@@ -137,9 +137,8 @@ class State:
             sort_keys=True,
             separators=(",", ":"),
         )
-
         state_id = StateID(
-            sha256(encoded.encode("utf-8")).hexdigest()[:16]
+            sha256(encoded.encode("utf-8")).hexdigest()
         )
 
         immutable_values = MappingProxyType(dict(values))
