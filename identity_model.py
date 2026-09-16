@@ -213,6 +213,13 @@ class State:
 
     @staticmethod
     def create(values: Mapping[EntityID, Value]) -> State:
+        for entity, value in values.items():
+            if value.entity != entity:
+                raise ValueError(
+                    f"value entity {value.entity.value} does not match "
+                    f"state key {entity.value}"
+                )
+
         canonical_values = [
             (
                 canonical_serialize(entity),
@@ -489,6 +496,32 @@ def test_state_identity_is_full_sha256() -> None:
     )
 
 
+def test_state_rejects_entity_key_mismatch() -> None:
+    foo = EntityID("foo")
+    bar = EntityID("bar")
+
+    try:
+        State.create({
+            foo: Value.create(bar, 42),
+        })
+    except ValueError:
+        pass
+    else:
+        raise AssertionError(
+            "state accepted mismatched entity key and value identity"
+        )
+
+
+def test_state_accepts_matching_entity_key() -> None:
+    foo = EntityID("foo")
+
+    state = State.create({
+        foo: Value.create(foo, 42),
+    })
+
+    assert state.values[foo].entity == foo
+
+
 def test_state_values_are_immutable() -> None:
     foo = EntityID("foo")
 
@@ -575,6 +608,8 @@ def run_all_tests() -> None:
     test_canonical_serialization_distinguishes_map_keys_by_type()
     test_state_identity_uses_canonical_serialization()
     test_state_identity_is_full_sha256()
+    test_state_rejects_entity_key_mismatch()
+    test_state_accepts_matching_entity_key()
     test_state_values_are_immutable()
     test_original_input_mapping_cannot_mutate_state()
     test_value_content_is_immutable()
