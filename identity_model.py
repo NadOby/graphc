@@ -270,6 +270,31 @@ class State:
             ) from exc
 
 
+def transfer_reference(
+    reference: Reference,
+    destination: State,
+    destination_entity: EntityID,
+) -> Reference:
+    """Explicitly establish the meaning of a reference in another state.
+
+    The operation does not claim that the source and destination values
+    are semantically equal. It only establishes that the caller intends
+    the destination reference to designate the specified destination
+    entity.
+    """
+
+    if destination_entity not in destination.values:
+        raise KeyError(
+            f"{destination_entity.value} is absent from "
+            f"{destination.id.value}"
+        )
+
+    return Reference(
+        destination.id,
+        destination_entity,
+    )
+
+
 def transform(
     state: State,
     changes: Mapping[EntityID, Any],
@@ -352,6 +377,89 @@ def test_cross_state_reference_does_not_rebind() -> None:
     else:
         raise AssertionError(
             "cross-state reference silently rebound"
+        )
+
+
+def test_explicit_cross_state_transfer() -> None:
+    foo = EntityID("foo")
+
+    s0 = State.create({
+        foo: Value.create(foo, 1),
+    })
+
+    s1 = transform(s0, {
+        foo: 2,
+    })
+
+    source_reference = s0.reference(foo)
+    destination_reference = transfer_reference(
+        source_reference,
+        s1,
+        foo,
+    )
+
+    assert destination_reference.state == s1.id
+    assert destination_reference.entity == foo
+    assert s1.resolve(destination_reference).content == 2
+
+    try:
+        s1.resolve(source_reference)
+    except CrossStateReference:
+        pass
+    else:
+        raise AssertionError(
+            "source reference silently rebound after transfer"
+        )
+
+
+def test_explicit_cross_state_transfer_can_select_different_entity() -> None:
+    foo = EntityID("foo")
+    bar = EntityID("bar")
+
+    s0 = State.create({
+        foo: Value.create(foo, 1),
+    })
+
+    s1 = State.create({
+        bar: Value.create(bar, 99),
+    })
+
+    source_reference = s0.reference(foo)
+
+    destination_reference = transfer_reference(
+        source_reference,
+        s1,
+        bar,
+    )
+
+    assert destination_reference.state == s1.id
+    assert destination_reference.entity == bar
+    assert s1.resolve(destination_reference).content == 99
+
+
+def test_explicit_cross_state_transfer_requires_destination_entity() -> None:
+    foo = EntityID("foo")
+    bar = EntityID("bar")
+
+    s0 = State.create({
+        foo: Value.create(foo, 1),
+    })
+
+    s1 = State.create({
+        foo: Value.create(foo, 2),
+    })
+
+    try:
+        transfer_reference(
+            s0.reference(foo),
+            s1,
+            bar,
+        )
+    except KeyError:
+        pass
+    else:
+        raise AssertionError(
+            "transfer accepted absent destination entity"
         )
 
 
@@ -598,6 +706,9 @@ def run_all_tests() -> None:
     test_evolution()
     test_branching()
     test_cross_state_reference_does_not_rebind()
+    test_explicit_cross_state_transfer()
+    test_explicit_cross_state_transfer_can_select_different_entity()
+    test_explicit_cross_state_transfer_requires_destination_entity()
     test_identity_and_equality_are_distinct()
     test_state_identity_is_history_independent()
     test_transform_does_not_mutate_source()
