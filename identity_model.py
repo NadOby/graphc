@@ -152,7 +152,7 @@ def canonicalize(value: Any) -> Any:
         items = [
             (
                 canonicalize(key),
-                canonicalize(item),
+                canonicalize(item)
             )
             for key, item in value.items()
         ]
@@ -273,14 +273,34 @@ class State:
 def transfer_reference(
     reference: Reference,
     destination: State,
+) -> Reference:
+    """Transfer a reference to the same conceptual entity in another state.
+
+    The destination must contain the same EntityID. No claim is made that
+    the source and destination values are semantically equal.
+    """
+
+    if reference.entity not in destination.values:
+        raise KeyError(
+            f"{reference.entity.value} is absent from "
+            f"{destination.id.value}"
+        )
+
+    return Reference(
+        destination.id,
+        reference.entity,
+    )
+
+
+def rebind_reference(
+    reference: Reference,
+    destination: State,
     destination_entity: EntityID,
 ) -> Reference:
-    """Explicitly establish the meaning of a reference in another state.
+    """Explicitly establish a reference to a chosen destination entity.
 
-    The operation does not claim that the source and destination values
-    are semantically equal. It only establishes that the caller intends
-    the destination reference to designate the specified destination
-    entity.
+    This does not preserve conceptual identity and therefore is not a
+    transfer of the original entity.
     """
 
     if destination_entity not in destination.values:
@@ -380,7 +400,7 @@ def test_cross_state_reference_does_not_rebind() -> None:
         )
 
 
-def test_explicit_cross_state_transfer() -> None:
+def test_explicit_cross_state_transfer_preserves_entity() -> None:
     foo = EntityID("foo")
 
     s0 = State.create({
@@ -392,10 +412,10 @@ def test_explicit_cross_state_transfer() -> None:
     })
 
     source_reference = s0.reference(foo)
+
     destination_reference = transfer_reference(
         source_reference,
         s1,
-        foo,
     )
 
     assert destination_reference.state == s1.id
@@ -412,7 +432,32 @@ def test_explicit_cross_state_transfer() -> None:
         )
 
 
-def test_explicit_cross_state_transfer_can_select_different_entity() -> None:
+def test_transfer_requires_same_entity_in_destination() -> None:
+    foo = EntityID("foo")
+    bar = EntityID("bar")
+
+    s0 = State.create({
+        foo: Value.create(foo, 1),
+    })
+
+    s1 = State.create({
+        bar: Value.create(bar, 99),
+    })
+
+    try:
+        transfer_reference(
+            s0.reference(foo),
+            s1,
+        )
+    except KeyError:
+        pass
+    else:
+        raise AssertionError(
+            "transfer accepted a destination without the same entity"
+        )
+
+
+def test_rebind_can_select_different_entity() -> None:
     foo = EntityID("foo")
     bar = EntityID("bar")
 
@@ -426,7 +471,7 @@ def test_explicit_cross_state_transfer_can_select_different_entity() -> None:
 
     source_reference = s0.reference(foo)
 
-    destination_reference = transfer_reference(
+    destination_reference = rebind_reference(
         source_reference,
         s1,
         bar,
@@ -436,31 +481,7 @@ def test_explicit_cross_state_transfer_can_select_different_entity() -> None:
     assert destination_reference.entity == bar
     assert s1.resolve(destination_reference).content == 99
 
-
-def test_explicit_cross_state_transfer_requires_destination_entity() -> None:
-    foo = EntityID("foo")
-    bar = EntityID("bar")
-
-    s0 = State.create({
-        foo: Value.create(foo, 1),
-    })
-
-    s1 = State.create({
-        foo: Value.create(foo, 2),
-    })
-
-    try:
-        transfer_reference(
-            s0.reference(foo),
-            s1,
-            bar,
-        )
-    except KeyError:
-        pass
-    else:
-        raise AssertionError(
-            "transfer accepted absent destination entity"
-        )
+    assert destination_reference.entity != source_reference.entity
 
 
 def test_identity_and_equality_are_distinct() -> None:
@@ -706,9 +727,9 @@ def run_all_tests() -> None:
     test_evolution()
     test_branching()
     test_cross_state_reference_does_not_rebind()
-    test_explicit_cross_state_transfer()
-    test_explicit_cross_state_transfer_can_select_different_entity()
-    test_explicit_cross_state_transfer_requires_destination_entity()
+    test_explicit_cross_state_transfer_preserves_entity()
+    test_transfer_requires_same_entity_in_destination()
+    test_rebind_can_select_different_entity()
     test_identity_and_equality_are_distinct()
     test_state_identity_is_history_independent()
     test_transform_does_not_mutate_source()
