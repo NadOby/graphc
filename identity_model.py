@@ -204,20 +204,45 @@ class CrossStateReference(ValueError):
     pass
 
 
+class MissingEntityMapping(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class EntityMapping:
+    """Explicit conceptual identity mapping between two semantic states."""
+
+    source_state: StateID
+    source_entity: EntityID
+    destination_state: StateID
+    destination_entity: EntityID
+
+
 @dataclass(frozen=True)
 class State:
     """Immutable semantic state with deterministic content-derived identity."""
 
     id: StateID
     values: Mapping[EntityID, Value]
+    mappings: tuple[EntityMapping, ...]
 
     @staticmethod
-    def create(values: Mapping[EntityID, Value]) -> State:
+    def create(
+        values: Mapping[EntityID, Value],
+        mappings: tuple[EntityMapping, ...] = (),
+    ) -> State:
         for entity, value in values.items():
             if value.entity != entity:
                 raise ValueError(
                     f"value entity {value.entity.value} does not match "
                     f"state key {entity.value}"
+                )
+
+        for mapping in mappings:
+            if mapping.destination_state.value:
+                raise ValueError(
+                    "state mappings must be constructed before "
+                    "destination StateID is known"
                 )
 
         canonical_values = [
@@ -245,7 +270,11 @@ class State:
 
         immutable_values = MappingProxyType(dict(values))
 
-        return State(state_id, immutable_values)
+        return State(
+            state_id,
+            immutable_values,
+            tuple(mappings),
+        )
 
     def reference(self, entity: EntityID) -> Reference:
         if entity not in self.values:
@@ -269,26 +298,43 @@ class State:
                 f"{reference.entity.value} is absent from {self.id.value}"
             ) from exc
 
+    def mapped_entity(
+        self,
+        source_reference: Reference,
+    ) -> EntityID:
+        for mapping in self.mappings:
+            if (
+                mapping.source_state == source_reference.state
+                and mapping.source_entity == source_reference.entity
+                and mapping.destination_state == self.id
+            ):
+                return mapping.destination_entity
+
+        raise MissingEntityMapping(
+            f"no explicit mapping from "
+            f"{source_reference.entity.value}@"
+            f"{source_reference.state.value} to "
+            f"{self.id.value}"
+        )
+
 
 def transfer_reference(
     reference: Reference,
     destination: State,
 ) -> Reference:
-    """Transfer a reference to the same conceptual entity in another state.
+    """Transfer a reference through an explicit identity mapping."""
 
-    The destination must contain the same EntityID. No claim is made that
-    the source and destination values are semantically equal.
-    """
+    destination_entity = destination.mapped_entity(reference)
 
-    if reference.entity not in destination.values:
+    if destination_entity not in destination.values:
         raise KeyError(
-            f"{reference.entity.value} is absent from "
+            f"{destination_entity.value} is absent from "
             f"{destination.id.value}"
         )
 
     return Reference(
         destination.id,
-        reference.entity,
+        destination_entity,
     )
 
 
@@ -319,14 +365,121 @@ def transform(
     state: State,
     changes: Mapping[EntityID, Any],
 ) -> State:
-    """Produce a new immutable state without modifying the source state."""
+    """Produce a new immutable state without modifying the source state.
+
+    Existing entities retain their conceptual identity automatically.
+    """
 
     values = dict(state.values)
 
     for entity, content in changes.items():
         values[entity] = Value(entity, content)
 
-    return State.create(values)
+    canonical_values = [
+        (
+            canonical_serialize(entity),
+            canonical_serialize(values[entity].content),
+        )
+        for entity in sorted(values)
+    ]
+
+    canonical_values.sort(key=lambda item: item[0])
+
+    encoded = (
+        b"STATE"
+        + _encode_length(len(canonical_values))
+        + b"".join(
+            entity + content
+            for entity, content in canonical_values
+        )
+    )
+
+    state_id = StateID(
+        sha256(encoded).hexdigest()
+    )
+
+    mappings = tuple(
+        EntityMapping(
+            source_state=state.id,
+            source_entity=entity,
+            destination_state=state_id,
+            destination_entity=entity,
+        )
+        for entity in values
+        if entity in state.values
+    )
+
+    return State(
+        state_id,
+        MappingProxyType(dict(values)),
+        mappings,
+    )
+
+
+def transform_with_mapping(
+    state: State,
+    changes: Mapping[EntityID, Any],
+    entity_mappings: Mapping[EntityID, EntityID],
+) -> State:
+    """Produce a new state with explicit source-to-destination mappings."""
+
+    values = dict(state.values)
+
+    for entity, content in changes.items():
+        values[entity] = Value(entity, content)
+
+    for source_entity, destination_entity in entity_mappings.items():
+        if source_entity not in state.values:
+            raise KeyError(
+                f"{source_entity.value} is absent from "
+                f"{state.id.value}"
+            )
+
+        if destination_entity not in values:
+            raise KeyError(
+                f"{destination_entity.value} is absent from "
+                f"destination state"
+            )
+
+    canonical_values = [
+        (
+            canonical_serialize(entity),
+            canonical_serialize(values[entity].content),
+        )
+        for entity in sorted(values)
+    ]
+
+    canonical_values.sort(key=lambda item: item[0])
+
+    encoded = (
+        b"STATE"
+        + _encode_length(len(canonical_values))
+        + b"".join(
+            entity + content
+            for entity, content in canonical_values
+        )
+    )
+
+    state_id = StateID(
+        sha256(encoded).hexdigest()
+    )
+
+    mappings = tuple(
+        EntityMapping(
+            source_state=state.id,
+            source_entity=source_entity,
+            destination_state=state_id,
+            destination_entity=destination_entity,
+        )
+        for source_entity, destination_entity
+        in entity_mappings.items()
+    )
+
+    return State(
+        state_id,
+        MappingProxyType(dict(values)),
+        mappings,
+    )
 
 
 def semantic_equal(left: Value, right: Value) -> bool:
@@ -354,9 +507,15 @@ def test_evolution() -> None:
         foo: 2,
     })
 
+    new_reference = transfer_reference(
+        old_reference,
+        s1,
+    )
+
     assert s0.resolve(old_reference).content == 1
-    assert s1.resolve(s1.reference(foo)).content == 2
+    assert s1.resolve(new_reference).content == 2
     assert s0.id != s1.id
+    assert new_reference.entity == foo
 
 
 def test_branching() -> None:
@@ -377,6 +536,21 @@ def test_branching() -> None:
     assert left.id != right.id
     assert left.values[foo].content == 2
     assert right.values[foo].content == 3
+
+    left_reference = transfer_reference(
+        s0.reference(foo),
+        left,
+    )
+
+    right_reference = transfer_reference(
+        s0.reference(foo),
+        right,
+    )
+
+    assert left_reference.entity == foo
+    assert right_reference.entity == foo
+    assert left.resolve(left_reference).content == 2
+    assert right.resolve(right_reference).content == 3
 
 
 def test_cross_state_reference_does_not_rebind() -> None:
@@ -400,48 +574,15 @@ def test_cross_state_reference_does_not_rebind() -> None:
         )
 
 
-def test_explicit_cross_state_transfer_preserves_entity() -> None:
+def test_transfer_requires_explicit_mapping() -> None:
     foo = EntityID("foo")
-
-    s0 = State.create({
-        foo: Value.create(foo, 1),
-    })
-
-    s1 = transform(s0, {
-        foo: 2,
-    })
-
-    source_reference = s0.reference(foo)
-
-    destination_reference = transfer_reference(
-        source_reference,
-        s1,
-    )
-
-    assert destination_reference.state == s1.id
-    assert destination_reference.entity == foo
-    assert s1.resolve(destination_reference).content == 2
-
-    try:
-        s1.resolve(source_reference)
-    except CrossStateReference:
-        pass
-    else:
-        raise AssertionError(
-            "source reference silently rebound after transfer"
-        )
-
-
-def test_transfer_requires_same_entity_in_destination() -> None:
-    foo = EntityID("foo")
-    bar = EntityID("bar")
 
     s0 = State.create({
         foo: Value.create(foo, 1),
     })
 
     s1 = State.create({
-        bar: Value.create(bar, 99),
+        foo: Value.create(foo, 2),
     })
 
     try:
@@ -449,15 +590,60 @@ def test_transfer_requires_same_entity_in_destination() -> None:
             s0.reference(foo),
             s1,
         )
-    except KeyError:
+    except MissingEntityMapping:
         pass
     else:
         raise AssertionError(
-            "transfer accepted a destination without the same entity"
+            "transfer accepted implicit identity continuation"
         )
 
 
-def test_rebind_can_select_different_entity() -> None:
+def test_explicit_mapping_preserves_identity() -> None:
+    foo = EntityID("foo")
+
+    s0 = State.create({
+        foo: Value.create(foo, 1),
+    })
+
+    s1 = transform_with_mapping(
+        s0,
+        {foo: 2},
+        {foo: foo},
+    )
+
+    destination_reference = transfer_reference(
+        s0.reference(foo),
+        s1,
+    )
+
+    assert destination_reference.entity == foo
+    assert s1.resolve(destination_reference).content == 2
+
+
+def test_explicit_mapping_can_rename_entity() -> None:
+    foo = EntityID("foo")
+    bar = EntityID("bar")
+
+    s0 = State.create({
+        foo: Value.create(foo, 1),
+    })
+
+    s1 = transform_with_mapping(
+        s0,
+        {bar: 2},
+        {foo: bar},
+    )
+
+    destination_reference = transfer_reference(
+        s0.reference(foo),
+        s1,
+    )
+
+    assert destination_reference.entity == bar
+    assert s1.resolve(destination_reference).content == 2
+
+
+def test_rebind_is_not_transfer() -> None:
     foo = EntityID("foo")
     bar = EntityID("bar")
 
@@ -480,7 +666,6 @@ def test_rebind_can_select_different_entity() -> None:
     assert destination_reference.state == s1.id
     assert destination_reference.entity == bar
     assert s1.resolve(destination_reference).content == 99
-
     assert destination_reference.entity != source_reference.entity
 
 
@@ -727,9 +912,10 @@ def run_all_tests() -> None:
     test_evolution()
     test_branching()
     test_cross_state_reference_does_not_rebind()
-    test_explicit_cross_state_transfer_preserves_entity()
-    test_transfer_requires_same_entity_in_destination()
-    test_rebind_can_select_different_entity()
+    test_transfer_requires_explicit_mapping()
+    test_explicit_mapping_preserves_identity()
+    test_explicit_mapping_can_rename_entity()
+    test_rebind_is_not_transfer()
     test_identity_and_equality_are_distinct()
     test_state_identity_is_history_independent()
     test_transform_does_not_mutate_source()
