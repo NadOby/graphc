@@ -311,4 +311,118 @@ def test_transform_does_not_mutate_source() -> None:
     })
 
     s1 = transform(s0, {
-        foo:
+        foo: 2,
+    })
+
+    assert s0.values[foo].content == 1
+    assert s1.values[foo].content == 2
+
+
+def test_canonical_serialization_is_type_sensitive() -> None:
+    foo = EntityID("foo")
+
+    int_state = State.create({
+        foo: Value.create(foo, 1),
+    })
+
+    bool_state = State.create({
+        foo: Value.create(foo, True),
+    })
+
+    assert int_state.id != bool_state.id
+
+
+def test_canonical_serialization_handles_nested_values() -> None:
+    foo = EntityID("foo")
+
+    first = State.create({
+        foo: Value.create(foo, {
+            "numbers": [1, 2, 3],
+            "nested": ("a", b"bc"),
+        }),
+    })
+
+    second = State.create({
+        foo: Value.create(foo, {
+            "nested": ("a", b"bc"),
+            "numbers": [1, 2, 3],
+        }),
+    })
+
+    assert first.id == second.id
+
+
+def test_state_values_are_immutable() -> None:
+    foo = EntityID("foo")
+
+    state = State.create({
+        foo: Value.create(foo, 1),
+    })
+
+    try:
+        state.values[foo] = Value.create(foo, 2)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError(
+            "semantic state values are mutable"
+        )
+
+    assert state.values[foo].content == 1
+
+
+def test_original_input_mapping_cannot_mutate_state() -> None:
+    foo = EntityID("foo")
+
+    values = {
+        foo: Value.create(foo, 1),
+    }
+
+    state = State.create(values)
+
+    values[foo] = Value.create(foo, 2)
+
+    assert state.values[foo].content == 1
+
+
+def test_value_content_is_immutable() -> None:
+    foo = EntityID("foo")
+
+    original = [1, 2, 3]
+    value = Value.create(foo, original)
+
+    original.append(4)
+
+    assert value.content == (
+        "__type__",
+        "list",
+        (1, 2, 3),
+    )
+
+    try:
+        value.content[2] += (4,)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError(
+            "canonical semantic value content is mutable"
+        )
+
+
+def run_all_tests() -> None:
+    test_evolution()
+    test_branching()
+    test_cross_state_reference_does_not_rebind()
+    test_identity_and_equality_are_distinct()
+    test_state_identity_is_history_independent()
+    test_transform_does_not_mutate_source()
+    test_canonical_serialization_is_type_sensitive()
+    test_canonical_serialization_handles_nested_values()
+    test_state_values_are_immutable()
+    test_original_input_mapping_cannot_mutate_state()
+    test_value_content_is_immutable()
+
+
+if __name__ == "__main__":
+    run_all_tests()
+    print("All identity/reference tests passed.")
