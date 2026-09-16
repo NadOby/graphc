@@ -69,6 +69,15 @@ def canonical_serialize(value: Any) -> bytes:
     if isinstance(value, StateID):
         return b"T" + _encode_text(value.value)
 
+    if isinstance(value, EntityMapping):
+        return (
+            b"R"
+            + canonical_serialize(value.source_state)
+            + canonical_serialize(value.source_entity)
+            + canonical_serialize(value.destination_state)
+            + canonical_serialize(value.destination_entity)
+        )
+
     if isinstance(value, tuple):
         encoded_items = [
             canonical_serialize(item)
@@ -133,6 +142,16 @@ def canonicalize(value: Any) -> Any:
 
     if isinstance(value, StateID):
         return ("__type__", "state_id", value.value)
+
+    if isinstance(value, EntityMapping):
+        return (
+            "__type__",
+            "entity_mapping",
+            canonicalize(value.source_state),
+            canonicalize(value.source_entity),
+            canonicalize(value.destination_state),
+            canonicalize(value.destination_entity),
+        )
 
     if isinstance(value, tuple):
         return (
@@ -218,6 +237,40 @@ class EntityMapping:
     destination_entity: EntityID
 
 
+def _state_content(
+    values: Mapping[EntityID, Value],
+    mappings: tuple[EntityMapping, ...],
+) -> bytes:
+    canonical_values = [
+        (
+            canonical_serialize(entity),
+            canonical_serialize(values[entity].content),
+        )
+        for entity in sorted(values)
+    ]
+
+    canonical_values.sort(key=lambda item: item[0])
+
+    canonical_mappings = sorted(
+        (
+            canonical_serialize(mapping)
+            for mapping in mappings
+        )
+    )
+
+    return (
+        b"STATE"
+        + _encode_length(len(canonical_values))
+        + b"".join(
+            entity + content
+            for entity, content in canonical_values
+        )
+        + b"MAPPINGS"
+        + _encode_length(len(canonical_mappings))
+        + b"".join(canonical_mappings)
+    )
+
+
 @dataclass(frozen=True)
 class State:
     """Immutable semantic state with deterministic content-derived identity."""
@@ -238,42 +291,81 @@ class State:
                     f"state key {entity.value}"
                 )
 
-        for mapping in mappings:
-            if mapping.destination_state.value:
-                raise ValueError(
-                    "state mappings must be constructed before "
-                    "destination StateID is known"
-                )
+        immutable_values = MappingProxyType(dict(values))
 
-        canonical_values = [
-            (
-                canonical_serialize(entity),
-                canonical_serialize(values[entity].content),
+        if mappings:
+            raise ValueError(
+                "State.create cannot accept preconstructed mappings; "
+                "use transform or transform_with_mapping"
             )
-            for entity in sorted(values)
-        ]
 
-        canonical_values.sort(key=lambda item: item[0])
-
-        encoded = (
-            b"STATE"
-            + _encode_length(len(canonical_values))
-            + b"".join(
-                entity + content
-                for entity, content in canonical_values
-            )
+        encoded = _state_content(
+            immutable_values,
+            (),
         )
 
         state_id = StateID(
             sha256(encoded).hexdigest()
         )
 
+        return State(
+            state_id,
+            immutable_values,
+            (),
+        )
+
+    @staticmethod
+    def _from_values_and_mappings(
+        values: Mapping[EntityID, Value],
+        mapping_pairs: Mapping[EntityID, EntityID],
+        source_state: StateID,
+    ) -> State:
         immutable_values = MappingProxyType(dict(values))
+
+        provisional_encoded = _state_content(
+            immutable_values,
+            (),
+        )
+
+        provisional_state_id = StateID(
+            sha256(provisional_encoded).hexdigest()
+        )
+
+        mappings = tuple(
+            EntityMapping(
+                source_state=source_state,
+                source_entity=source_entity,
+                destination_state=provisional_state_id,
+                destination_entity=destination_entity,
+            )
+            for source_entity, destination_entity
+            in sorted(mapping_pairs.items())
+        )
+
+        encoded = _state_content(
+            immutable_values,
+            mappings,
+        )
+
+        state_id = StateID(
+            sha256(encoded).hexdigest()
+        )
+
+        mappings = tuple(
+            EntityMapping(
+                source_state=source_state,
+                source_entity=source_entity,
+                destination_state=state_id,
+                destination_entity=destination_entity,
+            )
+            for source_entity, destination_entity
+            in sorted(mapping_pairs.items())
+        )
 
         return State(
             state_id,
             immutable_values,
-            tuple(mappings),
+            mappings,
         )
 
     def reference(self, entity: EntityID) -> Reference:
@@ -302,20 +394,32 @@ class State:
         self,
         source_reference: Reference,
     ) -> EntityID:
-        for mapping in self.mappings:
+        matches = [
+            mapping.destination_entity
+            for mapping in self.mappings
             if (
                 mapping.source_state == source_reference.state
                 and mapping.source_entity == source_reference.entity
                 and mapping.destination_state == self.id
-            ):
-                return mapping.destination_entity
+            )
+        ]
 
-        raise MissingEntityMapping(
-            f"no explicit mapping from "
-            f"{source_reference.entity.value}@"
-            f"{source_reference.state.value} to "
-            f"{self.id.value}"
-        )
+        if not matches:
+            raise MissingEntityMapping(
+                f"no explicit mapping from "
+                f"{source_reference.entity.value}@"
+                f"{source_reference.state.value} to "
+                f"{self.id.value}"
+            )
+
+        if len(matches) > 1:
+            raise ValueError(
+                f"multiple destination entities mapped from "
+                f"{source_reference.entity.value}@"
+                f"{source_reference.state.value}"
+            )
+
+        return matches[0]
 
 
 def transfer_reference(
@@ -375,44 +479,16 @@ def transform(
     for entity, content in changes.items():
         values[entity] = Value(entity, content)
 
-    canonical_values = [
-        (
-            canonical_serialize(entity),
-            canonical_serialize(values[entity].content),
-        )
-        for entity in sorted(values)
-    ]
+    mapping_pairs = {
+        entity: entity
+        for entity in state.values
+        if entity in values
+    }
 
-    canonical_values.sort(key=lambda item: item[0])
-
-    encoded = (
-        b"STATE"
-        + _encode_length(len(canonical_values))
-        + b"".join(
-            entity + content
-            for entity, content in canonical_values
-        )
-    )
-
-    state_id = StateID(
-        sha256(encoded).hexdigest()
-    )
-
-    mappings = tuple(
-        EntityMapping(
-            source_state=state.id,
-            source_entity=entity,
-            destination_state=state_id,
-            destination_entity=entity,
-        )
-        for entity in values
-        if entity in state.values
-    )
-
-    return State(
-        state_id,
-        MappingProxyType(dict(values)),
-        mappings,
+    return State._from_values_and_mappings(
+        values,
+        mapping_pairs,
+        state.id,
     )
 
 
@@ -441,44 +517,10 @@ def transform_with_mapping(
                 f"destination state"
             )
 
-    canonical_values = [
-        (
-            canonical_serialize(entity),
-            canonical_serialize(values[entity].content),
-        )
-        for entity in sorted(values)
-    ]
-
-    canonical_values.sort(key=lambda item: item[0])
-
-    encoded = (
-        b"STATE"
-        + _encode_length(len(canonical_values))
-        + b"".join(
-            entity + content
-            for entity, content in canonical_values
-        )
-    )
-
-    state_id = StateID(
-        sha256(encoded).hexdigest()
-    )
-
-    mappings = tuple(
-        EntityMapping(
-            source_state=state.id,
-            source_entity=source_entity,
-            destination_state=state_id,
-            destination_entity=destination_entity,
-        )
-        for source_entity, destination_entity
-        in entity_mappings.items()
-    )
-
-    return State(
-        state_id,
-        MappingProxyType(dict(values)),
-        mappings,
+    return State._from_values_and_mappings(
+        values,
+        entity_mappings,
+        state.id,
     )
 
 
@@ -667,6 +709,68 @@ def test_rebind_is_not_transfer() -> None:
     assert destination_reference.entity == bar
     assert s1.resolve(destination_reference).content == 99
     assert destination_reference.entity != source_reference.entity
+
+
+def test_state_identity_includes_mappings() -> None:
+    foo = EntityID("foo")
+    bar = EntityID("bar")
+    baz = EntityID("baz")
+
+    s0 = State.create({
+        foo: Value.create(foo, 1),
+    })
+
+    first = transform_with_mapping(
+        s0,
+        {
+            bar: Value.create(bar, 2).content,
+            baz: Value.create(baz, 3).content,
+        },
+        {
+            foo: bar,
+        },
+    )
+
+    second = transform_with_mapping(
+        s0,
+        {
+            bar: Value.create(bar, 2).content,
+            baz: Value.create(baz, 3).content,
+        },
+        {
+            foo: baz,
+        },
+    )
+
+    assert first.id != second.id
+
+
+def test_state_mapping_is_immutable() -> None:
+    foo = EntityID("foo")
+
+    s0 = State.create({
+        foo: Value.create(foo, 1),
+    })
+
+    s1 = transform(s0, {
+        foo: 2,
+    })
+
+    try:
+        s1.mappings += (
+            EntityMapping(
+                s0.id,
+                foo,
+                s1.id,
+                foo,
+            ),
+        )
+    except AttributeError:
+        pass
+    else:
+        raise AssertionError(
+            "state mappings are mutable"
+        )
 
 
 def test_identity_and_equality_are_distinct() -> None:
@@ -916,6 +1020,8 @@ def run_all_tests() -> None:
     test_explicit_mapping_preserves_identity()
     test_explicit_mapping_can_rename_entity()
     test_rebind_is_not_transfer()
+    test_state_identity_includes_mappings()
+    test_state_mapping_is_immutable()
     test_identity_and_equality_are_distinct()
     test_state_identity_is_history_independent()
     test_transform_does_not_mutate_source()
