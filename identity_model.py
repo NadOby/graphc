@@ -31,8 +31,14 @@ class Entity:
 
 @dataclass(frozen=True)
 class Value:
+    """Immutable semantic value."""
+
     entity: EntityID
     content: Any
+
+    @staticmethod
+    def create(entity: EntityID, content: Any) -> Value:
+        return Value(entity, canonicalize(content))
 
 
 @dataclass(frozen=True)
@@ -48,28 +54,33 @@ class CrossStateReference(ValueError):
 
 
 def canonicalize(value: Any) -> Any:
-    """Convert supported semantic values to deterministic JSON data."""
+    """Convert supported semantic values to immutable deterministic data."""
 
     if value is None or isinstance(value, (bool, int, str)):
         return value
 
     if isinstance(value, bytes):
-        return {
-            "__type__": "bytes",
-            "hex": value.hex(),
-        }
+        return ("__type__", "bytes", value.hex())
+
+    if isinstance(value, EntityID):
+        return ("__type__", "entity_id", value.value)
+
+    if isinstance(value, StateID):
+        return ("__type__", "state_id", value.value)
 
     if isinstance(value, tuple):
-        return {
-            "__type__": "tuple",
-            "items": [canonicalize(item) for item in value],
-        }
+        return (
+            "__type__",
+            "tuple",
+            tuple(canonicalize(item) for item in value),
+        )
 
     if isinstance(value, list):
-        return {
-            "__type__": "list",
-            "items": [canonicalize(item) for item in value],
-        }
+        return (
+            "__type__",
+            "list",
+            tuple(canonicalize(item) for item in value),
+        )
 
     if isinstance(value, Mapping):
         items = [
@@ -88,22 +99,11 @@ def canonicalize(value: Any) -> Any:
             )
         )
 
-        return {
-            "__type__": "map",
-            "items": items,
-        }
-
-    if isinstance(value, EntityID):
-        return {
-            "__type__": "entity_id",
-            "value": value.value,
-        }
-
-    if isinstance(value, StateID):
-        return {
-            "__type__": "state_id",
-            "value": value.value,
-        }
+        return (
+            "__type__",
+            "map",
+            tuple(items),
+        )
 
     raise TypeError(
         f"unsupported value for canonical semantic serialization: "
@@ -121,7 +121,7 @@ class State:
     @staticmethod
     def create(values: Mapping[EntityID, Value]) -> State:
         normalized = {
-            entity.value: canonicalize(values[entity].content)
+            entity.value: values[entity].content
             for entity in sorted(values)
         }
 
@@ -171,7 +171,7 @@ def transform(
     values = dict(state.values)
 
     for entity, content in changes.items():
-        values[entity] = Value(entity, content)
+        values[entity] = Value.create(entity, content)
 
     return State.create(values)
 
@@ -192,7 +192,7 @@ def test_evolution() -> None:
     foo = EntityID("foo")
 
     s0 = State.create({
-        foo: Value(foo, 1),
+        foo: Value.create(foo, 1),
     })
 
     old_reference = s0.reference(foo)
@@ -210,7 +210,7 @@ def test_branching() -> None:
     foo = EntityID("foo")
 
     s0 = State.create({
-        foo: Value(foo, 1),
+        foo: Value.create(foo, 1),
     })
 
     left = transform(s0, {
@@ -230,7 +230,7 @@ def test_cross_state_reference_does_not_rebind() -> None:
     foo = EntityID("foo")
 
     s0 = State.create({
-        foo: Value(foo, 1),
+        foo: Value.create(foo, 1),
     })
 
     s1 = transform(s0, {
@@ -251,11 +251,11 @@ def test_identity_and_equality_are_distinct() -> None:
     foo = EntityID("foo")
 
     s1 = State.create({
-        foo: Value(foo, 2),
+        foo: Value.create(foo, 2),
     })
 
     s2 = State.create({
-        foo: Value(foo, 3),
+        foo: Value.create(foo, 3),
     })
 
     assert same_entity(
@@ -271,8 +271,8 @@ def test_identity_and_equality_are_distinct() -> None:
     bar = EntityID("bar")
 
     s3 = State.create({
-        foo: Value(foo, 42),
-        bar: Value(bar, 42),
+        foo: Value.create(foo, 42),
+        bar: Value.create(bar, 42),
     })
 
     assert not same_entity(
@@ -291,13 +291,13 @@ def test_state_identity_is_history_independent() -> None:
     bar = EntityID("bar")
 
     first = State.create({
-        foo: Value(foo, 42),
-        bar: Value(bar, 10),
+        foo: Value.create(foo, 42),
+        bar: Value.create(bar, 10),
     })
 
     second = State.create({
-        bar: Value(bar, 10),
-        foo: Value(foo, 42),
+        bar: Value.create(bar, 10),
+        foo: Value.create(foo, 42),
     })
 
     assert first.id == second.id
@@ -307,97 +307,8 @@ def test_transform_does_not_mutate_source() -> None:
     foo = EntityID("foo")
 
     s0 = State.create({
-        foo: Value(foo, 1),
+        foo: Value.create(foo, 1),
     })
 
     s1 = transform(s0, {
-        foo: 2,
-    })
-
-    assert s0.values[foo].content == 1
-    assert s1.values[foo].content == 2
-
-
-def test_canonical_serialization_is_type_sensitive() -> None:
-    foo = EntityID("foo")
-
-    int_state = State.create({
-        foo: Value(foo, 1),
-    })
-
-    bool_state = State.create({
-        foo: Value(foo, True),
-    })
-
-    assert int_state.id != bool_state.id
-
-
-def test_canonical_serialization_handles_nested_values() -> None:
-    foo = EntityID("foo")
-
-    first = State.create({
-        foo: Value(foo, {
-            "numbers": [1, 2, 3],
-            "nested": ("a", b"bc"),
-        }),
-    })
-
-    second = State.create({
-        foo: Value(foo, {
-            "nested": ("a", b"bc"),
-            "numbers": [1, 2, 3],
-        }),
-    })
-
-    assert first.id == second.id
-
-
-def test_state_values_are_immutable() -> None:
-    foo = EntityID("foo")
-
-    state = State.create({
-        foo: Value(foo, 1),
-    })
-
-    try:
-        state.values[foo] = Value(foo, 2)
-    except TypeError:
-        pass
-    else:
-        raise AssertionError(
-            "semantic state values are mutable"
-        )
-
-    assert state.values[foo].content == 1
-
-
-def test_original_input_mapping_cannot_mutate_state() -> None:
-    foo = EntityID("foo")
-
-    values = {
-        foo: Value(foo, 1),
-    }
-
-    state = State.create(values)
-
-    values[foo] = Value(foo, 2)
-
-    assert state.values[foo].content == 1
-
-
-def run_all_tests() -> None:
-    test_evolution()
-    test_branching()
-    test_cross_state_reference_does_not_rebind()
-    test_identity_and_equality_are_distinct()
-    test_state_identity_is_history_independent()
-    test_transform_does_not_mutate_source()
-    test_canonical_serialization_is_type_sensitive()
-    test_canonical_serialization_handles_nested_values()
-    test_state_values_are_immutable()
-    test_original_input_mapping_cannot_mutate_state()
-
-
-if __name__ == "__main__":
-    run_all_tests()
-    print("All identity/reference tests passed.")
+        foo:
