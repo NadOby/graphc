@@ -309,6 +309,38 @@ def test_transform_does_not_mutate_source() -> None:
     assert s0.values[foo].content == 1
     assert s1.values[foo].content == 2
 
+def test_canonical_serialization_is_type_sensitive() -> None:
+    foo = EntityID("foo")
+
+    int_state = State.create({
+        foo: Value(foo, 1),
+    })
+
+    bool_state = State.create({
+        foo: Value(foo, True),
+    })
+
+    assert int_state.id != bool_state.id
+
+
+def test_canonical_serialization_handles_nested_values() -> None:
+    foo = EntityID("foo")
+
+    first = State.create({
+        foo: Value(foo, {
+            "numbers": [1, 2, 3],
+            "nested": ("a", b"bc"),
+        }),
+    })
+
+    second = State.create({
+        foo: Value(foo, {
+            "nested": ("a", b"bc"),
+            "numbers": [1, 2, 3],
+        }),
+    })
+
+    assert first.id == second.id
 
 def run_all_tests() -> None:
     test_evolution()
@@ -317,6 +349,8 @@ def run_all_tests() -> None:
     test_identity_and_equality_are_distinct()
     test_state_identity_is_history_independent()
     test_transform_does_not_mutate_source()
+    test_canonical_serialization_is_type_sensitive()
+    test_canonical_serialization_handles_nested_values()
 
 
 if __name__ == "__main__":
