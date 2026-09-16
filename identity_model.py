@@ -45,6 +45,66 @@ class Reference:
 class CrossStateReference(ValueError):
     pass
 
+def canonicalize(value: Any) -> Any:
+    """Convert supported semantic values to deterministic JSON data."""
+
+    if value is None or isinstance(value, (bool, int, str)):
+        return value
+
+    if isinstance(value, bytes):
+        return {
+            "__type__": "bytes",
+            "hex": value.hex(),
+        }
+
+    if isinstance(value, tuple):
+        return {
+            "__type__": "tuple",
+            "items": [canonicalize(item) for item in value],
+        }
+
+    if isinstance(value, list):
+        return {
+            "__type__": "list",
+            "items": [canonicalize(item) for item in value],
+        }
+
+    if isinstance(value, Mapping):
+        items = [
+            (
+                canonicalize(key),
+                canonicalize(item),
+            )
+            for key, item in value.items()
+        ]
+
+        items.sort(key=lambda item: json.dumps(
+            item[0],
+            sort_keys=True,
+            separators=(",", ":"),
+        ))
+
+        return {
+            "__type__": "map",
+            "items": items,
+        }
+
+    if isinstance(value, EntityID):
+        return {
+            "__type__": "entity_id",
+            "value": value.value,
+        }
+
+    if isinstance(value, StateID):
+        return {
+            "__type__": "state_id",
+            "value": value.value,
+        }
+
+    raise TypeError(
+        f"unsupported value for canonical semantic serialization: "
+        f"{type(value).__name__}"
+    )
 
 @dataclass(frozen=True)
 class State:
@@ -52,11 +112,11 @@ class State:
 
     id: StateID
     values: Mapping[EntityID, Value]
-
+    
     @staticmethod
     def create(values: Mapping[EntityID, Value]) -> State:
         normalized = {
-            entity.value: values[entity].content
+            entity.value: canonicalize(values[entity].content)
             for entity in sorted(values)
         }
 
@@ -64,7 +124,6 @@ class State:
             normalized,
             sort_keys=True,
             separators=(",", ":"),
-            default=repr,
         )
 
         state_id = StateID(
@@ -72,7 +131,6 @@ class State:
         )
 
         return State(state_id, dict(values))
-
     def reference(self, entity: EntityID) -> Reference:
         if entity not in self.values:
             raise KeyError(
