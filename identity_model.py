@@ -29,30 +29,6 @@ class Entity:
     id: EntityID
 
 
-@dataclass(frozen=True)
-class Value:
-    """Immutable semantic value."""
-
-    entity: EntityID
-    content: Any
-
-    @staticmethod
-    def create(entity: EntityID, content: Any) -> Value:
-        return Value(entity, canonicalize(content))
-
-
-@dataclass(frozen=True)
-class Reference:
-    """Exact semantic reference: entity as represented by one state."""
-
-    state: StateID
-    entity: EntityID
-
-
-class CrossStateReference(ValueError):
-    pass
-
-
 def canonicalize(value: Any) -> Any:
     """Convert supported semantic values to immutable deterministic data."""
 
@@ -109,6 +85,37 @@ def canonicalize(value: Any) -> Any:
         f"unsupported value for canonical semantic serialization: "
         f"{type(value).__name__}"
     )
+
+
+@dataclass(frozen=True)
+class Value:
+    """Immutable semantic value."""
+
+    entity: EntityID
+    content: Any
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "content",
+            canonicalize(self.content),
+        )
+
+    @staticmethod
+    def create(entity: EntityID, content: Any) -> Value:
+        return Value(entity, content)
+
+
+@dataclass(frozen=True)
+class Reference:
+    """Exact semantic reference: entity as represented by one state."""
+
+    state: StateID
+    entity: EntityID
+
+
+class CrossStateReference(ValueError):
+    pass
 
 
 @dataclass(frozen=True)
@@ -171,7 +178,7 @@ def transform(
     values = dict(state.values)
 
     for entity, content in changes.items():
-        values[entity] = Value.create(entity, content)
+        values[entity] = Value(entity, content)
 
     return State.create(values)
 
@@ -409,6 +416,21 @@ def test_value_content_is_immutable() -> None:
         )
 
 
+def test_direct_value_construction_is_immutable() -> None:
+    foo = EntityID("foo")
+
+    original = [1, 2, 3]
+    value = Value(foo, original)
+
+    original.append(4)
+
+    assert value.content == (
+        "__type__",
+        "list",
+        (1, 2, 3),
+    )
+
+
 def run_all_tests() -> None:
     test_evolution()
     test_branching()
@@ -421,6 +443,7 @@ def run_all_tests() -> None:
     test_state_values_are_immutable()
     test_original_input_mapping_cannot_mutate_state()
     test_value_content_is_immutable()
+    test_direct_value_construction_is_immutable()
 
 
 if __name__ == "__main__":
