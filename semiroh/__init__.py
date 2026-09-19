@@ -3,6 +3,12 @@
 from .canonical import canonical_serialize, canonicalize
 from .equality import semantic_equal, same_entity, same_version
 from .identity import Entity, EntityID, StateID, VersionID
+from .ownership import (
+    OwnershipError,
+    owned_children,
+    owned_subtree,
+    owner_of,
+)
 from .references import (
     CrossStateReference,
     MissingEntityMapping,
@@ -31,6 +37,7 @@ __all__ = [
     "State",
     "EntityMapping",
     "TransformResult",
+    "OwnershipError",
     "CrossStateReference",
     "StaleReference",
     "MissingEntityMapping",
@@ -41,6 +48,9 @@ __all__ = [
     "same_entity",
     "same_version",
     "project_entity",
+    "owner_of",
+    "owned_children",
+    "owned_subtree",
     "transform",
     "transform_with_mapping",
     "transfer_reference",
