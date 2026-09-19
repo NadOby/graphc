@@ -9,10 +9,18 @@ from typing import Any, Mapping
 
 from .canonical import canonical_serialize
 from .identity import EntityID, StateID
+from .ownership import (
+    OwnershipError,
+    OwnershipMap,
+    normalize_ownership,
+    owned_children,
+    owned_subtree,
+    owner_of,
+)
 from .references import (
     CrossStateReference,
-    StaleReference,
     Reference,
+    StaleReference,
     make_reference,
 )
 from .values import Value, version_id_for
@@ -20,6 +28,10 @@ from .values import Value, version_id_for
 
 def _state_content(
     values: Mapping[EntityID, Value],
+    ownership: Mapping[
+        EntityID,
+        tuple[EntityID, ...],
+    ],
 ) -> bytes:
     canonical_values = [
         (
@@ -30,6 +42,18 @@ def _state_content(
     ]
 
     canonical_values.sort(
+        key=lambda item: item[0]
+    )
+
+    canonical_ownership = [
+        (
+            canonical_serialize(owner),
+            canonical_serialize(children),
+        )
+        for owner, children in ownership.items()
+    ]
+
+    canonical_ownership.sort(
         key=lambda item: item[0]
     )
 
@@ -44,6 +68,15 @@ def _state_content(
             entity + content
             for entity, content in canonical_values
         )
+        + len(canonical_ownership).to_bytes(
+            8,
+            byteorder="big",
+            signed=False,
+        )
+        + b"".join(
+            owner + children
+            for owner, children in canonical_ownership
+        )
     )
 
 
@@ -53,14 +86,21 @@ class State:
 
     State identity is derived only from semantic content.
     Transformation mappings and provenance are not state content.
+
+    Ownership is part of semantic state content.
     """
 
     id: StateID
     values: Mapping[EntityID, Value]
+    ownership: Mapping[
+        EntityID,
+        tuple[EntityID, ...],
+    ]
 
     @staticmethod
     def create(
         values: Mapping[EntityID, Value],
+        ownership: OwnershipMap | None = None,
     ) -> "State":
         for entity, value in values.items():
             if value.entity != entity:
@@ -73,8 +113,29 @@ class State:
             dict(values)
         )
 
+        normalized_ownership = normalize_ownership(
+            ownership or {}
+        )
+
+        for owner, children in normalized_ownership.items():
+            if owner not in immutable_values:
+                raise OwnershipError(
+                    f"owner {owner.value} is absent from state"
+                )
+
+            for child in children:
+                if child not in immutable_values:
+                    raise OwnershipError(
+                        f"owned entity {child.value} is absent from state"
+                    )
+
+        immutable_ownership = MappingProxyType(
+            dict(normalized_ownership)
+        )
+
         encoded = _state_content(
-            immutable_values
+            immutable_values,
+            immutable_ownership,
         )
 
         state_id = StateID(
@@ -84,6 +145,7 @@ class State:
         return State(
             id=state_id,
             values=immutable_values,
+            ownership=immutable_ownership,
         )
 
     def reference(
@@ -135,6 +197,48 @@ class State:
     ) -> bool:
         return entity in self.values
 
+    def owner_of(
+        self,
+        entity: EntityID,
+    ) -> EntityID | None:
+        if entity not in self.values:
+            raise KeyError(
+                f"{entity.value} is absent from {self.id.value}"
+            )
+
+        return owner_of(
+            self.ownership,
+            entity,
+        )
+
+    def owned_children(
+        self,
+        owner: EntityID,
+    ) -> tuple[EntityID, ...]:
+        if owner not in self.values:
+            raise KeyError(
+                f"{owner.value} is absent from {self.id.value}"
+            )
+
+        return owned_children(
+            self.ownership,
+            owner,
+        )
+
+    def owned_subtree(
+        self,
+        owner: EntityID,
+    ) -> frozenset[EntityID]:
+        if owner not in self.values:
+            raise KeyError(
+                f"{owner.value} is absent from {self.id.value}"
+            )
+
+        return owned_subtree(
+            self.ownership,
+            owner,
+        )
+
     def with_changes(
         self,
         changes: Mapping[EntityID, Any],
@@ -147,4 +251,50 @@ class State:
                 content,
             )
 
-        return State.create(values)
+        return State.create(
+            values,
+            self.ownership,
+        )
+
+    def destroy(
+        self,
+        entity: EntityID,
+    ) -> "State":
+        """Produce a new state with an entity and its owned subtree removed."""
+
+        if entity not in self.values:
+            raise KeyError(
+                f"{entity.value} is absent from {self.id.value}"
+            )
+
+        removed = {
+            entity,
+            *self.owned_subtree(entity),
+        }
+
+        values = {
+            current_entity: value
+            for current_entity, value in self.values.items()
+            if current_entity not in removed
+        }
+
+        ownership = {
+            owner: tuple(
+                child
+                for child in children
+                if child not in removed
+            )
+            for owner, children in self.ownership.items()
+            if owner not in removed
+        }
+
+        ownership = {
+            owner: children
+            for owner, children in ownership.items()
+            if children
+        }
+
+        return State.create(
+            values,
+            ownership,
+        )
