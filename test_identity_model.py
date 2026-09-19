@@ -938,24 +938,24 @@ def test_transform_does_not_infer_ownership_from_entity_mapping() -> None:
         },
     )
 
-    try:
-        transform_with_mapping(
-            state,
-            {
-                new_root: 10,
-                new_child: 11,
-            },
-            {
-                root: new_root,
-                child: new_child,
-            },
-        )
-    except OwnershipError:
-        pass
-    else:
-        raise AssertionError(
-            "entity mapping implicitly transferred ownership"
-        )
+    result = transform_with_mapping(
+        state,
+        {
+            new_root: 10,
+            new_child: 11,
+        },
+        {
+            root: new_root,
+            child: new_child,
+        },
+    )
+
+    assert result.destination.ownership == {
+        root: (child,),
+    }
+
+    assert result.destination.owner_of(child) == root
+    assert result.destination.owner_of(new_child) is None
 
 
 def test_transform_can_explicitly_preserve_ownership_after_rename() -> None:
@@ -1136,55 +1136,61 @@ def test_transform_changes_state_identity_when_ownership_changes() -> None:
 
 
 def run_all_tests() -> None:
-    test_entity_version_changes_when_content_changes()
-    test_identical_entity_versions_have_identical_version_ids()
-    test_version_id_is_history_independent()
-    test_reference_is_version_pinned()
-    test_cross_state_reference_does_not_rebind()
-    test_stale_reference_is_detectable()
-    test_transfer_requires_explicit_mapping()
-    test_explicit_mapping_preserves_entity_identity()
-    test_explicit_mapping_can_rename_entity()
-    test_rebind_is_not_transfer()
-    test_version_fast_path_for_exact_value()
-    test_same_entity_different_versions_are_not_equal()
-    test_different_entities_same_content_are_equal()
-    test_state_identity_is_history_independent()
-    test_state_identity_ignores_transition_mapping()
-    test_state_values_are_immutable()
-    test_state_ownership_is_immutable()
-    test_value_content_is_immutable()
-    test_direct_value_construction_is_immutable()
-    test_original_input_mapping_cannot_mutate_state()
-    test_original_ownership_mapping_cannot_mutate_state()
-    test_canonical_serialization_is_type_sensitive()
-    test_canonical_serialization_is_length_delimited()
-    test_canonical_serialization_handles_nested_values()
-    test_canonical_serialization_distinguishes_sequence_types()
-    test_canonical_serialization_distinguishes_map_keys_by_type()
-    test_state_identity_uses_canonical_serialization()
-    test_state_identity_is_full_sha256()
-    test_state_rejects_entity_key_mismatch()
-    test_ownership_has_single_owner()
-    test_ownership_rejects_self_cycle()
-    test_ownership_rejects_recursive_cycle()
-    test_ownership_requires_existing_entities()
-    test_owner_and_children_queries()
-    test_ownership_affects_state_identity()
-    test_ownership_order_does_not_affect_state_identity()
-    test_destroy_removes_owned_subtree()
-    test_destroy_child_preserves_owner_and_unrelated_entities()
-    test_destroy_does_not_mutate_original_state()
-    test_ordinary_reference_cycles_do_not_affect_ownership()
-    test_transform_preserves_ownership_when_entities_are_unchanged()
-    test_transform_can_explicitly_remove_ownership()
-    test_transform_can_explicitly_change_ownership()
-    test_transform_does_not_infer_ownership_from_entity_mapping()
-    test_transform_can_explicitly_preserve_ownership_after_rename()
-    test_transform_rejects_invalid_destination_ownership()
-    test_transform_rejects_destination_ownership_cycle()
-    test_transform_does_not_mutate_source_ownership()
-    test_transform_changes_state_identity_when_ownership_changes()
+    tests = [
+        test_entity_version_changes_when_content_changes,
+        test_identical_entity_versions_have_identical_version_ids,
+        test_version_id_is_history_independent,
+        test_reference_is_version_pinned,
+        test_cross_state_reference_does_not_rebind,
+        test_stale_reference_is_detectable,
+        test_transfer_requires_explicit_mapping,
+        test_explicit_mapping_preserves_entity_identity,
+        test_explicit_mapping_can_rename_entity,
+        test_rebind_is_not_transfer,
+        test_version_fast_path_for_exact_value,
+        test_same_entity_different_versions_are_not_equal,
+        test_different_entities_same_content_are_equal,
+        test_state_identity_is_history_independent,
+        test_state_identity_ignores_transition_mapping,
+        test_state_values_are_immutable,
+        test_state_ownership_is_immutable,
+        test_value_content_is_immutable,
+        test_direct_value_construction_is_immutable,
+        test_original_input_mapping_cannot_mutate_state,
+        test_original_ownership_mapping_cannot_mutate_state,
+        test_canonical_serialization_is_type_sensitive,
+        test_canonical_serialization_is_length_delimited,
+        test_canonical_serialization_handles_nested_values,
+        test_canonical_serialization_distinguishes_sequence_types,
+        test_canonical_serialization_distinguishes_map_keys_by_type,
+        test_state_identity_uses_canonical_serialization,
+        test_state_identity_is_full_sha256,
+        test_state_rejects_entity_key_mismatch,
+        test_ownership_has_single_owner,
+        test_ownership_rejects_self_cycle,
+        test_ownership_rejects_recursive_cycle,
+        test_ownership_requires_existing_entities,
+        test_owner_and_children_queries,
+        test_ownership_affects_state_identity,
+        test_ownership_order_does_not_affect_state_identity,
+        test_destroy_removes_owned_subtree,
+        test_destroy_child_preserves_owner_and_unrelated_entities,
+        test_destroy_does_not_mutate_original_state,
+        test_ordinary_reference_cycles_do_not_affect_ownership,
+        test_transform_preserves_ownership_when_entities_are_unchanged,
+        test_transform_can_explicitly_remove_ownership,
+        test_transform_can_explicitly_change_ownership,
+        test_transform_does_not_infer_ownership_from_entity_mapping,
+        test_transform_can_explicitly_preserve_ownership_after_rename,
+        test_transform_rejects_invalid_destination_ownership,
+        test_transform_rejects_destination_ownership_cycle,
+        test_transform_does_not_mutate_source_ownership,
+        test_transform_changes_state_identity_when_ownership_changes,
+    ]
+
+    for test in tests:
+        test()
+        print(f"PASS {test.__name__}")
 
 
 if __name__ == "__main__":
