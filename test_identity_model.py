@@ -4,6 +4,7 @@ from semiroh import (
     CrossStateReference,
     EntityID,
     MissingEntityMapping,
+    OwnershipError,
     State,
     StaleReference,
     Value,
@@ -345,6 +346,32 @@ def test_state_values_are_immutable() -> None:
     assert state.values[foo].content == 1
 
 
+def test_state_ownership_is_immutable() -> None:
+    foo = EntityID("foo")
+    bar = EntityID("bar")
+
+    state = State.create(
+        {
+            foo: Value.create(foo, 1),
+            bar: Value.create(bar, 2),
+        },
+        {
+            foo: (bar,),
+        },
+    )
+
+    try:
+        state.ownership[foo] = (bar,)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError(
+            "semantic state ownership is mutable"
+        )
+
+    assert state.ownership[foo] == (bar,)
+
+
 def test_value_content_is_immutable() -> None:
     foo = EntityID("foo")
 
@@ -396,6 +423,27 @@ def test_original_input_mapping_cannot_mutate_state() -> None:
     values[foo] = Value.create(foo, 2)
 
     assert state.values[foo].content == 1
+
+
+def test_original_ownership_mapping_cannot_mutate_state() -> None:
+    foo = EntityID("foo")
+    bar = EntityID("bar")
+
+    ownership = {
+        foo: [bar],
+    }
+
+    state = State.create(
+        {
+            foo: Value.create(foo, 1),
+            bar: Value.create(bar, 2),
+        },
+        ownership,
+    )
+
+    ownership[foo].append(foo)
+
+    assert state.ownership[foo] == (bar,)
 
 
 def test_canonical_serialization_is_type_sensitive() -> None:
@@ -484,6 +532,302 @@ def test_state_rejects_entity_key_mismatch() -> None:
         )
 
 
+def test_ownership_has_single_owner() -> None:
+    root = EntityID("root")
+    left = EntityID("left")
+    right = EntityID("right")
+
+    try:
+        State.create(
+            {
+                root: Value.create(root, 0),
+                left: Value.create(left, 1),
+                right: Value.create(right, 2),
+            },
+            {
+                root: (left,),
+                right: (left,),
+            },
+        )
+    except OwnershipError:
+        pass
+    else:
+        raise AssertionError(
+            "ownership accepted multiple owners"
+        )
+
+
+def test_ownership_rejects_self_cycle() -> None:
+    foo = EntityID("foo")
+
+    try:
+        State.create(
+            {
+                foo: Value.create(foo, 1),
+            },
+            {
+                foo: (foo,),
+            },
+        )
+    except OwnershipError:
+        pass
+    else:
+        raise AssertionError(
+            "ownership accepted self-cycle"
+        )
+
+
+def test_ownership_rejects_recursive_cycle() -> None:
+    a = EntityID("a")
+    b = EntityID("b")
+    c = EntityID("c")
+
+    try:
+        State.create(
+            {
+                a: Value.create(a, 1),
+                b: Value.create(b, 2),
+                c: Value.create(c, 3),
+            },
+            {
+                a: (b,),
+                b: (c,),
+                c: (a,),
+            },
+        )
+    except OwnershipError:
+        pass
+    else:
+        raise AssertionError(
+            "ownership accepted recursive cycle"
+        )
+
+
+def test_ownership_requires_existing_entities() -> None:
+    owner = EntityID("owner")
+    missing = EntityID("missing")
+
+    try:
+        State.create(
+            {
+                owner: Value.create(owner, 1),
+            },
+            {
+                owner: (missing,),
+            },
+        )
+    except OwnershipError:
+        pass
+    else:
+        raise AssertionError(
+            "ownership accepted an absent child"
+        )
+
+
+def test_owner_and_children_queries() -> None:
+    root = EntityID("root")
+    left = EntityID("left")
+    right = EntityID("right")
+    leaf = EntityID("leaf")
+
+    state = State.create(
+        {
+            root: Value.create(root, 0),
+            left: Value.create(left, 1),
+            right: Value.create(right, 2),
+            leaf: Value.create(leaf, 3),
+        },
+        {
+            root: (left, right),
+            left: (leaf,),
+        },
+    )
+
+    assert state.owner_of(root) is None
+    assert state.owner_of(left) == root
+    assert state.owner_of(leaf) == left
+
+    assert state.owned_children(root) == (
+        left,
+        right,
+    )
+
+    assert state.owned_children(left) == (
+        leaf,
+    )
+
+    assert state.owned_subtree(root) == frozenset({
+        left,
+        right,
+        leaf,
+    })
+
+    assert state.owned_subtree(left) == frozenset({
+        leaf,
+    })
+
+
+def test_ownership_affects_state_identity() -> None:
+    root = EntityID("root")
+    child = EntityID("child")
+
+    without_ownership = State.create(
+        {
+            root: Value.create(root, 1),
+            child: Value.create(child, 2),
+        },
+    )
+
+    with_ownership = State.create(
+        {
+            root: Value.create(root, 1),
+            child: Value.create(child, 2),
+        },
+        {
+            root: (child,),
+        },
+    )
+
+    assert without_ownership.id != with_ownership.id
+
+
+def test_ownership_order_does_not_affect_state_identity() -> None:
+    root = EntityID("root")
+    left = EntityID("left")
+    right = EntityID("right")
+
+    first = State.create(
+        {
+            root: Value.create(root, 0),
+            left: Value.create(left, 1),
+            right: Value.create(right, 2),
+        },
+        {
+            root: (right, left),
+        },
+    )
+
+    second = State.create(
+        {
+            root: Value.create(root, 0),
+            left: Value.create(left, 1),
+            right: Value.create(right, 2),
+        },
+        {
+            root: (left, right),
+        },
+    )
+
+    assert first.id == second.id
+
+
+def test_destroy_removes_owned_subtree() -> None:
+    root = EntityID("root")
+    child = EntityID("child")
+    leaf = EntityID("leaf")
+    independent = EntityID("independent")
+
+    state = State.create(
+        {
+            root: Value.create(root, 0),
+            child: Value.create(child, 1),
+            leaf: Value.create(leaf, 2),
+            independent: Value.create(independent, 3),
+        },
+        {
+            root: (child,),
+            child: (leaf,),
+        },
+    )
+
+    destroyed = state.destroy(root)
+
+    assert not destroyed.contains(root)
+    assert not destroyed.contains(child)
+    assert not destroyed.contains(leaf)
+    assert destroyed.contains(independent)
+    assert destroyed.ownership == {}
+
+
+def test_destroy_child_preserves_owner_and_unrelated_entities() -> None:
+    root = EntityID("root")
+    child = EntityID("child")
+    sibling = EntityID("sibling")
+    leaf = EntityID("leaf")
+
+    state = State.create(
+        {
+            root: Value.create(root, 0),
+            child: Value.create(child, 1),
+            sibling: Value.create(sibling, 2),
+            leaf: Value.create(leaf, 3),
+        },
+        {
+            root: (child, sibling),
+            child: (leaf,),
+        },
+    )
+
+    destroyed = state.destroy(child)
+
+    assert destroyed.contains(root)
+    assert destroyed.contains(sibling)
+    assert not destroyed.contains(child)
+    assert not destroyed.contains(leaf)
+
+    assert destroyed.ownership == {
+        root: (sibling,),
+    }
+
+
+def test_destroy_does_not_mutate_original_state() -> None:
+    root = EntityID("root")
+    child = EntityID("child")
+
+    state = State.create(
+        {
+            root: Value.create(root, 0),
+            child: Value.create(child, 1),
+        },
+        {
+            root: (child,),
+        },
+    )
+
+    destroyed = state.destroy(root)
+
+    assert state.contains(root)
+    assert state.contains(child)
+    assert state.ownership == {
+        root: (child,),
+    }
+
+    assert destroyed.values == {}
+    assert destroyed.ownership == {}
+
+
+def test_ordinary_reference_cycles_do_not_affect_ownership() -> None:
+    a = EntityID("a")
+    b = EntityID("b")
+
+    state = State.create(
+        {
+            a: Value.create(a, {
+                "reference": b,
+            }),
+            b: Value.create(b, {
+                "reference": a,
+            }),
+        },
+        {
+            a: (b,),
+        },
+    )
+
+    assert state.owner_of(b) == a
+    assert state.owner_of(a) is None
+
+
 def run_all_tests() -> None:
     test_entity_version_changes_when_content_changes()
     test_identical_entity_versions_have_identical_version_ids()
@@ -501,9 +845,11 @@ def run_all_tests() -> None:
     test_state_identity_is_history_independent()
     test_state_identity_ignores_transition_mapping()
     test_state_values_are_immutable()
+    test_state_ownership_is_immutable()
     test_value_content_is_immutable()
     test_direct_value_construction_is_immutable()
     test_original_input_mapping_cannot_mutate_state()
+    test_original_ownership_mapping_cannot_mutate_state()
     test_canonical_serialization_is_type_sensitive()
     test_canonical_serialization_is_length_delimited()
     test_canonical_serialization_handles_nested_values()
@@ -512,8 +858,19 @@ def run_all_tests() -> None:
     test_state_identity_uses_canonical_serialization()
     test_state_identity_is_full_sha256()
     test_state_rejects_entity_key_mismatch()
+    test_ownership_has_single_owner()
+    test_ownership_rejects_self_cycle()
+    test_ownership_rejects_recursive_cycle()
+    test_ownership_requires_existing_entities()
+    test_owner_and_children_queries()
+    test_ownership_affects_state_identity()
+    test_ownership_order_does_not_affect_state_identity()
+    test_destroy_removes_owned_subtree()
+    test_destroy_child_preserves_owner_and_unrelated_entities()
+    test_destroy_does_not_mutate_original_state()
+    test_ordinary_reference_cycles_do_not_affect_ownership()
 
 
 if __name__ == "__main__":
     run_all_tests()
-    print("All identity/version/reference tests passed.")
+    print("All identity/version/reference/ownership tests passed.")
