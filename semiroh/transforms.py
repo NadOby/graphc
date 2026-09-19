@@ -11,7 +11,7 @@ from .references import (
     Reference,
 )
 from .state import State
-from .values import version_id_for
+from .values import Value, version_id_for
 
 
 @dataclass(frozen=True)
@@ -84,7 +84,7 @@ def transform_with_mapping(
     values = dict(state.values)
 
     for entity, content in changes.items():
-        values[entity] = state.values[entity].__class__(
+        values[entity] = Value(
             entity,
             content,
         )
