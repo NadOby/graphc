@@ -4,10 +4,14 @@ on:
   push:
     paths:
       - "identity_model.py"
+      - "semiroh/**"
+      - "test_identity_model.py"
       - ".github/workflows/semantic-model.yml"
   pull_request:
     paths:
       - "identity_model.py"
+      - "semiroh/**"
+      - "test_identity_model.py"
       - ".github/workflows/semantic-model.yml"
 
 jobs:
