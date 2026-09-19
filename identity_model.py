@@ -74,7 +74,6 @@ def canonical_serialize(value: Any) -> bytes:
             b"R"
             + canonical_serialize(value.source_state)
             + canonical_serialize(value.source_entity)
-            + canonical_serialize(value.destination_state)
             + canonical_serialize(value.destination_entity)
         )
 
@@ -149,7 +148,6 @@ def canonicalize(value: Any) -> Any:
             "entity_mapping",
             canonicalize(value.source_state),
             canonicalize(value.source_entity),
-            canonicalize(value.destination_state),
             canonicalize(value.destination_entity),
         )
 
@@ -171,7 +169,7 @@ def canonicalize(value: Any) -> Any:
         items = [
             (
                 canonicalize(key),
-                canonicalize(item)
+                canonicalize(item),
             )
             for key, item in value.items()
         ]
@@ -229,11 +227,10 @@ class MissingEntityMapping(ValueError):
 
 @dataclass(frozen=True)
 class EntityMapping:
-    """Explicit conceptual identity mapping between two semantic states."""
+    """Identity continuation relation stored inside a destination state."""
 
     source_state: StateID
     source_entity: EntityID
-    destination_state: StateID
     destination_entity: EntityID
 
 
@@ -252,10 +249,8 @@ def _state_content(
     canonical_values.sort(key=lambda item: item[0])
 
     canonical_mappings = sorted(
-        (
-            canonical_serialize(mapping)
-            for mapping in mappings
-        )
+        canonical_serialize(mapping)
+        for mapping in mappings
     )
 
     return (
@@ -322,20 +317,10 @@ class State:
     ) -> State:
         immutable_values = MappingProxyType(dict(values))
 
-        provisional_encoded = _state_content(
-            immutable_values,
-            (),
-        )
-
-        provisional_state_id = StateID(
-            sha256(provisional_encoded).hexdigest()
-        )
-
         mappings = tuple(
             EntityMapping(
                 source_state=source_state,
                 source_entity=source_entity,
-                destination_state=provisional_state_id,
                 destination_entity=destination_entity,
             )
             for source_entity, destination_entity
@@ -349,17 +334,6 @@ class State:
 
         state_id = StateID(
             sha256(encoded).hexdigest()
-        )
-
-        mappings = tuple(
-            EntityMapping(
-                source_state=source_state,
-                source_entity=source_entity,
-                destination_state=state_id,
-                destination_entity=destination_entity,
-            )
-            for source_entity, destination_entity
-            in sorted(mapping_pairs.items())
         )
 
         return State(
@@ -400,7 +374,6 @@ class State:
             if (
                 mapping.source_state == source_reference.state
                 and mapping.source_entity == source_reference.entity
-                and mapping.destination_state == self.id
             )
         ]
 
@@ -761,7 +734,6 @@ def test_state_mapping_is_immutable() -> None:
             EntityMapping(
                 s0.id,
                 foo,
-                s1.id,
                 foo,
             ),
         )
