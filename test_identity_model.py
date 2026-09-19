@@ -1,6 +1,7 @@
 """Tests for the SEMIROH identity and immutable-state model."""
 
 from semiroh import (
+    AmbiguousEntityMapping,
     CrossStateReference,
     EntityID,
     MissingEntityMapping,
@@ -1135,6 +1136,564 @@ def test_transform_changes_state_identity_when_ownership_changes() -> None:
     assert result.destination.id != state.id
 
 
+def test_mapped_entities_returns_single_destination() -> None:
+    foo = EntityID("foo")
+    bar = EntityID("bar")
+
+    state = State.create({
+        foo: Value.create(foo, 1),
+    })
+
+    result = transform_with_mapping(
+        state,
+        {
+            bar: 2,
+        },
+        {
+            foo: bar,
+        },
+    )
+
+    assert result.mapped_entities(
+        state.reference(foo)
+    ) == (bar,)
+
+
+def test_split_mapping_returns_all_destinations() -> None:
+    source = EntityID("source")
+    left = EntityID("left")
+    right = EntityID("right")
+
+    state = State.create({
+        source: Value.create(source, 1),
+    })
+
+    result = transform_with_mapping(
+        state,
+        {
+            left: 10,
+            right: 20,
+        },
+        {
+            source: (right, left),
+        },
+    )
+
+    assert result.mapped_entities(
+        state.reference(source)
+    ) == (
+        left,
+        right,
+    )
+
+
+def test_split_mapping_is_ambiguous_for_mapped_entity() -> None:
+    source = EntityID("source")
+    left = EntityID("left")
+    right = EntityID("right")
+
+    state = State.create({
+        source: Value.create(source, 1),
+    })
+
+    result = transform_with_mapping(
+        state,
+        {
+            left: 10,
+            right: 20,
+        },
+        {
+            source: (left, right),
+        },
+    )
+
+    try:
+        result.mapped_entity(
+            state.reference(source)
+        )
+    except AmbiguousEntityMapping:
+        pass
+    else:
+        raise AssertionError(
+            "mapped_entity silently selected one branch of a split"
+        )
+
+
+def test_split_mapping_cannot_transfer_reference() -> None:
+    source = EntityID("source")
+    left = EntityID("left")
+    right = EntityID("right")
+
+    state = State.create({
+        source: Value.create(source, 1),
+    })
+
+    result = transform_with_mapping(
+        state,
+        {
+            left: 10,
+            right: 20,
+        },
+        {
+            source: (left, right),
+        },
+    )
+
+    try:
+        transfer_reference(
+            state.reference(source),
+            result,
+        )
+    except AmbiguousEntityMapping:
+        pass
+    else:
+        raise AssertionError(
+            "reference transfer silently selected one split destination"
+        )
+
+
+def test_explicit_disappearance_is_distinct_from_missing_mapping() -> None:
+    source = EntityID("source")
+
+    state = State.create({
+        source: Value.create(source, 1),
+    })
+
+    result = transform_with_mapping(
+        state,
+        {},
+        {
+            source: (),
+        },
+    )
+
+    assert result.mapped_entities(
+        state.reference(source)
+    ) == ()
+
+    try:
+        result.mapped_entity(
+            state.reference(source)
+        )
+    except MissingEntityMapping:
+        pass
+    else:
+        raise AssertionError(
+            "explicit disappearance was not rejected as missing destination"
+        )
+
+
+def test_disappearance_cannot_transfer_reference() -> None:
+    source = EntityID("source")
+
+    state = State.create({
+        source: Value.create(source, 1),
+    })
+
+    result = transform_with_mapping(
+        state,
+        {},
+        {
+            source: (),
+        },
+    )
+
+    try:
+        transfer_reference(
+            state.reference(source),
+            result,
+        )
+    except MissingEntityMapping:
+        pass
+    else:
+        raise AssertionError(
+            "reference to a disappeared entity was transferred"
+        )
+
+
+def test_merge_maps_multiple_sources_to_one_destination() -> None:
+    first = EntityID("first")
+    second = EntityID("second")
+    merged = EntityID("merged")
+
+    state = State.create({
+        first: Value.create(first, 1),
+        second: Value.create(second, 2),
+    })
+
+    result = transform_with_mapping(
+        state,
+        {
+            merged: 3,
+        },
+        {
+            first: merged,
+            second: merged,
+        },
+    )
+
+    assert result.mapped_entities(
+        state.reference(first)
+    ) == (merged,)
+
+    assert result.mapped_entities(
+        state.reference(second)
+    ) == (merged,)
+
+    assert result.mapped_entity(
+        state.reference(first)
+    ) == merged
+
+    assert result.mapped_entity(
+        state.reference(second)
+    ) == merged
+
+
+def test_merge_allows_both_references_to_transfer() -> None:
+    first = EntityID("first")
+    second = EntityID("second")
+    merged = EntityID("merged")
+
+    state = State.create({
+        first: Value.create(first, 1),
+        second: Value.create(second, 2),
+    })
+
+    result = transform_with_mapping(
+        state,
+        {
+            merged: 3,
+        },
+        {
+            first: merged,
+            second: merged,
+        },
+    )
+
+    first_reference = transfer_reference(
+        state.reference(first),
+        result,
+    )
+
+    second_reference = transfer_reference(
+        state.reference(second),
+        result,
+    )
+
+    assert first_reference.entity == merged
+    assert second_reference.entity == merged
+    assert first_reference.state == result.destination.id
+    assert second_reference.state == result.destination.id
+
+
+def test_many_to_many_mapping_returns_complete_relation() -> None:
+    first = EntityID("first")
+    second = EntityID("second")
+    left = EntityID("left")
+    right = EntityID("right")
+
+    state = State.create({
+        first: Value.create(first, 1),
+        second: Value.create(second, 2),
+    })
+
+    result = transform_with_mapping(
+        state,
+        {
+            left: 10,
+            right: 20,
+        },
+        {
+            first: (right, left),
+            second: (left, right),
+        },
+    )
+
+    assert result.mapped_entities(
+        state.reference(first)
+    ) == (
+        left,
+        right,
+    )
+
+    assert result.mapped_entities(
+        state.reference(second)
+    ) == (
+        left,
+        right,
+    )
+
+
+def test_mapping_destination_order_is_canonicalized() -> None:
+    source = EntityID("source")
+    left = EntityID("left")
+    right = EntityID("right")
+
+    state = State.create({
+        source: Value.create(source, 1),
+    })
+
+    result_a = transform_with_mapping(
+        state,
+        {
+            left: 10,
+            right: 20,
+        },
+        {
+            source: (right, left),
+        },
+    )
+
+    result_b = transform_with_mapping(
+        state,
+        {
+            left: 10,
+            right: 20,
+        },
+        {
+            source: (left, right),
+        },
+    )
+
+    assert result_a.mappings == result_b.mappings
+
+
+def test_mapping_source_order_is_canonicalized() -> None:
+    first = EntityID("first")
+    second = EntityID("second")
+    left = EntityID("left")
+    right = EntityID("right")
+
+    state = State.create({
+        first: Value.create(first, 1),
+        second: Value.create(second, 2),
+    })
+
+    result_a = transform_with_mapping(
+        state,
+        {
+            left: 10,
+            right: 20,
+        },
+        {
+            second: (right,),
+            first: (left,),
+        },
+    )
+
+    result_b = transform_with_mapping(
+        state,
+        {
+            left: 10,
+            right: 20,
+        },
+        {
+            first: (left,),
+            second: (right,),
+        },
+    )
+
+    assert result_a.mappings == result_b.mappings
+
+
+def test_duplicate_destinations_are_rejected() -> None:
+    source = EntityID("source")
+    destination = EntityID("destination")
+
+    state = State.create({
+        source: Value.create(source, 1),
+    })
+
+    try:
+        transform_with_mapping(
+            state,
+            {
+                destination: 2,
+            },
+            {
+                source: (
+                    destination,
+                    destination,
+                ),
+            },
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError(
+            "mapping accepted duplicate destination entities"
+        )
+
+
+def test_missing_mapping_and_explicit_disappearance_are_distinct() -> None:
+    source = EntityID("source")
+
+    state = State.create({
+        source: Value.create(source, 1),
+    })
+
+    result = transform_with_mapping(
+        state,
+        {},
+        {},
+    )
+
+    try:
+        result.mapped_entities(
+            state.reference(source)
+        )
+    except MissingEntityMapping:
+        pass
+    else:
+        raise AssertionError(
+            "missing mapping was confused with explicit disappearance"
+        )
+
+    explicit = transform_with_mapping(
+        state,
+        {},
+        {
+            source: (),
+        },
+    )
+
+    assert explicit.mapped_entities(
+        state.reference(source)
+    ) == ()
+
+
+def test_mapping_requires_existing_source_entity() -> None:
+    source = EntityID("source")
+    missing = EntityID("missing")
+    destination = EntityID("destination")
+
+    state = State.create({
+        source: Value.create(source, 1),
+    })
+
+    try:
+        transform_with_mapping(
+            state,
+            {
+                destination: 2,
+            },
+            {
+                missing: destination,
+            },
+        )
+    except KeyError:
+        pass
+    else:
+        raise AssertionError(
+            "mapping accepted an absent source entity"
+        )
+
+
+def test_mapping_requires_existing_destination_entity() -> None:
+    source = EntityID("source")
+    missing = EntityID("missing")
+
+    state = State.create({
+        source: Value.create(source, 1),
+    })
+
+    try:
+        transform_with_mapping(
+            state,
+            {},
+            {
+                source: missing,
+            },
+        )
+    except KeyError:
+        pass
+    else:
+        raise AssertionError(
+            "mapping accepted an absent destination entity"
+        )
+
+
+def test_mapping_accepts_bare_entity_id_compatibility_form() -> None:
+    source = EntityID("source")
+    destination = EntityID("destination")
+
+    state = State.create({
+        source: Value.create(source, 1),
+    })
+
+    result = transform_with_mapping(
+        state,
+        {
+            destination: 2,
+        },
+        {
+            source: destination,
+        },
+    )
+
+    assert result.mapped_entities(
+        state.reference(source)
+    ) == (destination,)
+
+
+def test_transition_mapping_does_not_affect_destination_state_identity() -> None:
+    source = EntityID("source")
+    destination = EntityID("destination")
+
+    state = State.create({
+        source: Value.create(source, 1),
+    })
+
+    mapped = transform_with_mapping(
+        state,
+        {
+            destination: 2,
+        },
+        {
+            source: destination,
+        },
+    )
+
+    unmapped = transform_with_mapping(
+        state,
+        {
+            destination: 2,
+        },
+        {},
+    )
+
+    assert mapped.destination.id == unmapped.destination.id
+
+
+def test_transition_mapping_does_not_modify_ownership() -> None:
+    source = EntityID("source")
+    destination = EntityID("destination")
+    child = EntityID("child")
+
+    state = State.create(
+        {
+            source: Value.create(source, 1),
+            destination: Value.create(destination, 2),
+            child: Value.create(child, 3),
+        },
+        {
+            source: (child,),
+        },
+    )
+
+    result = transform_with_mapping(
+        state,
+        {},
+        {
+            source: destination,
+        },
+    )
+
+    assert result.destination.ownership == {
+        source: (child,),
+    }
+
+
 def run_all_tests() -> None:
     tests = [
         test_entity_version_changes_when_content_changes,
@@ -1186,6 +1745,24 @@ def run_all_tests() -> None:
         test_transform_rejects_destination_ownership_cycle,
         test_transform_does_not_mutate_source_ownership,
         test_transform_changes_state_identity_when_ownership_changes,
+        test_mapped_entities_returns_single_destination,
+        test_split_mapping_returns_all_destinations,
+        test_split_mapping_is_ambiguous_for_mapped_entity,
+        test_split_mapping_cannot_transfer_reference,
+        test_explicit_disappearance_is_distinct_from_missing_mapping,
+        test_disappearance_cannot_transfer_reference,
+        test_merge_maps_multiple_sources_to_one_destination,
+        test_merge_allows_both_references_to_transfer,
+        test_many_to_many_mapping_returns_complete_relation,
+        test_mapping_destination_order_is_canonicalized,
+        test_mapping_source_order_is_canonicalized,
+        test_duplicate_destinations_are_rejected,
+        test_missing_mapping_and_explicit_disappearance_are_distinct,
+        test_mapping_requires_existing_source_entity,
+        test_mapping_requires_existing_destination_entity,
+        test_mapping_accepts_bare_entity_id_compatibility_form,
+        test_transition_mapping_does_not_affect_destination_state_identity,
+        test_transition_mapping_does_not_modify_ownership,
     ]
 
     for test in tests:
