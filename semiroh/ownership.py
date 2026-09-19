@@ -11,13 +11,16 @@ class OwnershipError(ValueError):
     """An ownership relation violates semantic ownership rules."""
 
 
+OwnershipMap = Mapping[
+    EntityID,
+    Iterable[EntityID],
+]
+
+
 def normalize_ownership(
-    ownership: Mapping[
-        EntityID,
-        Iterable[EntityID],
-    ],
+    ownership: OwnershipMap,
 ) -> dict[EntityID, tuple[EntityID, ...]]:
-    """Validate and canonicalize an ownership relation."""
+    """Validate and canonicalize an ownership forest."""
 
     normalized = {
         owner: tuple(sorted(set(children)))
@@ -43,50 +46,36 @@ def normalize_ownership(
 
             parents[child] = owner
 
-    for start in normalized:
-        path: set[EntityID] = set()
-        current = start
+    # Ownership must be acyclic.
+    # 0 = unvisited, 1 = currently visiting, 2 = completely visited.
+    status: dict[EntityID, int] = {}
 
-        while current in normalized:
-            if current in path:
-                raise OwnershipError(
-                    f"ownership cycle detected at {current.value}"
-                )
+    def visit(entity: EntityID) -> None:
+        current_status = status.get(entity, 0)
 
-            path.add(current)
+        if current_status == 1:
+            raise OwnershipError(
+                f"ownership cycle detected at {entity.value}"
+            )
 
-            children = normalized[current]
+        if current_status == 2:
+            return
 
-            if not children:
-                break
+        status[entity] = 1
 
-            # A forest can have multiple children. Check each branch.
-            for child in children:
-                branch = set(path)
-                stack = [child]
+        for child in normalized.get(entity, ()):
+            visit(child)
 
-                while stack:
-                    entity = stack.pop()
+        status[entity] = 2
 
-                    if entity in branch:
-                        raise OwnershipError(
-                            f"ownership cycle detected at "
-                            f"{entity.value}"
-                        )
-
-                    branch.add(entity)
-                    stack.extend(normalized.get(entity, ()))
-
-            break
+    for owner in normalized:
+        visit(owner)
 
     return normalized
 
 
 def owner_of(
-    ownership: Mapping[
-        EntityID,
-        Iterable[EntityID],
-    ],
+    ownership: OwnershipMap,
     entity: EntityID,
 ) -> EntityID | None:
     """Return the unique owner of an entity, if any."""
@@ -99,13 +88,10 @@ def owner_of(
 
 
 def owned_children(
-    ownership: Mapping[
-        EntityID,
-        Iterable[EntityID],
-    ],
+    ownership: OwnershipMap,
     owner: EntityID,
 ) -> tuple[EntityID, ...]:
-    """Return the entities directly owned by an owner."""
+    """Return entities directly owned by an owner."""
 
     return tuple(
         sorted(
@@ -115,10 +101,7 @@ def owned_children(
 
 
 def owned_subtree(
-    ownership: Mapping[
-        EntityID,
-        Iterable[EntityID],
-    ],
+    ownership: OwnershipMap,
     owner: EntityID,
 ) -> frozenset[EntityID]:
     """Return the complete recursively owned subtree."""
