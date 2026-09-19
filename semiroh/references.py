@@ -20,6 +20,10 @@ class MissingEntityMapping(ValueError):
     """No explicit cross-state identity mapping exists."""
 
 
+class AmbiguousEntityMapping(ValueError):
+    """A cross-state identity mapping has multiple destinations."""
+
+
 @dataclass(frozen=True)
 class Reference:
     """State-pinned and version-pinned semantic reference."""
