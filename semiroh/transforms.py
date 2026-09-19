@@ -7,6 +7,7 @@ from typing import Any, Mapping
 
 from .identity import EntityID, StateID
 from .references import (
+    AmbiguousEntityMapping,
     MissingEntityMapping,
     Reference,
 )
@@ -16,11 +17,11 @@ from .values import Value, version_id_for
 
 @dataclass(frozen=True)
 class EntityMapping:
-    """One explicit identity-continuation relation across states."""
+    """Explicit continuity relation from one source entity to zero or more destinations."""
 
     source_state: StateID
     source_entity: EntityID
-    destination_entity: EntityID
+    destination_entities: tuple[EntityID, ...]
 
 
 @dataclass(frozen=True)
@@ -35,12 +36,14 @@ class TransformResult:
     mappings: tuple[EntityMapping, ...]
     provenance: Any = None
 
-    def mapped_entity(
+    def mapped_entities(
         self,
         reference: Reference,
-    ) -> EntityID:
+    ) -> tuple[EntityID, ...]:
+        """Return all explicit destination entities for a reference."""
+
         matches = [
-            mapping.destination_entity
+            mapping.destination_entities
             for mapping in self.mappings
             if (
                 mapping.source_state == reference.state
@@ -57,11 +60,37 @@ class TransformResult:
 
         if len(matches) > 1:
             raise ValueError(
-                f"multiple destination entities mapped from "
+                f"multiple mapping records for "
                 f"{reference.entity.value}@{reference.state.value}"
             )
 
         return matches[0]
+
+    def mapped_entity(
+        self,
+        reference: Reference,
+    ) -> EntityID:
+        """Return the unique destination entity.
+
+        Raises MissingEntityMapping when the source entity disappears and
+        AmbiguousEntityMapping when it maps to multiple destinations.
+        """
+
+        destinations = self.mapped_entities(reference)
+
+        if not destinations:
+            raise MissingEntityMapping(
+                f"entity {reference.entity.value}@{reference.state.value} "
+                f"has no destination in {self.destination.id.value}"
+            )
+
+        if len(destinations) > 1:
+            raise AmbiguousEntityMapping(
+                f"entity {reference.entity.value}@{reference.state.value} "
+                f"maps to multiple destination entities"
+            )
+
+        return destinations[0]
 
 
 def transform(
@@ -76,11 +105,19 @@ def transform(
 def transform_with_mapping(
     state: State,
     changes: Mapping[EntityID, Any],
-    entity_mappings: Mapping[EntityID, EntityID],
+    entity_mappings: Mapping[
+        EntityID,
+        EntityID | tuple[EntityID, ...],
+    ],
     provenance: Any = None,
     ownership: Mapping[EntityID, Any] | None = None,
 ) -> TransformResult:
-    """Produce a new state and an explicit transition mapping.
+    """Produce a new state and an explicit continuity mapping.
+
+    Each source entity may map to zero, one, or many destination entities.
+
+    A destination entity may also be named by multiple source mappings,
+    allowing many-to-one continuity.
 
     If ownership is omitted, the existing ownership relation is preserved
     literally. Entity mappings do not implicitly rename or otherwise modify
@@ -98,18 +135,44 @@ def transform_with_mapping(
             content,
         )
 
-    for source_entity, destination_entity in entity_mappings.items():
+    normalized_mappings: list[EntityMapping] = []
+
+    for source_entity, destination_spec in entity_mappings.items():
         if source_entity not in state.values:
             raise KeyError(
                 f"{source_entity.value} is absent from "
                 f"{state.id.value}"
             )
 
-        if destination_entity not in values:
-            raise KeyError(
-                f"{destination_entity.value} is absent from "
-                f"destination state"
+        if isinstance(destination_spec, EntityID):
+            destination_entities = (destination_spec,)
+        else:
+            destination_entities = tuple(destination_spec)
+
+        if len(destination_entities) != len(
+            set(destination_entities)
+        ):
+            raise ValueError(
+                f"duplicate destination entities in mapping from "
+                f"{source_entity.value}"
             )
+
+        for destination_entity in destination_entities:
+            if destination_entity not in values:
+                raise KeyError(
+                    f"{destination_entity.value} is absent from "
+                    f"destination state"
+                )
+
+        normalized_mappings.append(
+            EntityMapping(
+                source_state=state.id,
+                source_entity=source_entity,
+                destination_entities=tuple(
+                    sorted(destination_entities)
+                ),
+            )
+        )
 
     destination_ownership = (
         state.ownership
@@ -123,13 +186,10 @@ def transform_with_mapping(
     )
 
     mappings = tuple(
-        EntityMapping(
-            source_state=state.id,
-            source_entity=source_entity,
-            destination_entity=destination_entity,
+        sorted(
+            normalized_mappings,
+            key=lambda mapping: mapping.source_entity,
         )
-        for source_entity, destination_entity
-        in sorted(entity_mappings.items())
     )
 
     return TransformResult(
@@ -144,7 +204,7 @@ def transfer_reference(
     reference: Reference,
     result: TransformResult,
 ) -> Reference:
-    """Transfer a reference through an explicit transformation mapping."""
+    """Transfer a reference through a uniquely resolving mapping."""
 
     destination_entity = result.mapped_entity(reference)
 
