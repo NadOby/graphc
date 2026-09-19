@@ -10,6 +10,7 @@ from .ownership import (
     owner_of,
 )
 from .references import (
+    AmbiguousEntityMapping,
     CrossStateReference,
     MissingEntityMapping,
     Reference,
@@ -41,6 +42,7 @@ __all__ = [
     "CrossStateReference",
     "StaleReference",
     "MissingEntityMapping",
+    "AmbiguousEntityMapping",
     "canonical_serialize",
     "canonicalize",
     "version_id_for",
