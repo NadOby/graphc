@@ -828,6 +828,313 @@ def test_ordinary_reference_cycles_do_not_affect_ownership() -> None:
     assert state.owner_of(a) is None
 
 
+def test_transform_preserves_ownership_when_entities_are_unchanged() -> None:
+    root = EntityID("root")
+    child = EntityID("child")
+
+    state = State.create(
+        {
+            root: Value.create(root, 1),
+            child: Value.create(child, 2),
+        },
+        {
+            root: (child,),
+        },
+    )
+
+    result = transform_with_mapping(
+        state,
+        {
+            root: 10,
+            child: 20,
+        },
+        {
+            root: root,
+            child: child,
+        },
+    )
+
+    assert result.destination.ownership == {
+        root: (child,),
+    }
+
+
+def test_transform_can_explicitly_remove_ownership() -> None:
+    root = EntityID("root")
+    child = EntityID("child")
+
+    state = State.create(
+        {
+            root: Value.create(root, 1),
+            child: Value.create(child, 2),
+        },
+        {
+            root: (child,),
+        },
+    )
+
+    result = transform_with_mapping(
+        state,
+        {},
+        {
+            root: root,
+            child: child,
+        },
+        ownership={},
+    )
+
+    assert result.destination.ownership == {}
+    assert result.destination.contains(root)
+    assert result.destination.contains(child)
+
+
+def test_transform_can_explicitly_change_ownership() -> None:
+    root = EntityID("root")
+    left = EntityID("left")
+    right = EntityID("right")
+
+    state = State.create(
+        {
+            root: Value.create(root, 0),
+            left: Value.create(left, 1),
+            right: Value.create(right, 2),
+        },
+        {
+            root: (left,),
+        },
+    )
+
+    result = transform_with_mapping(
+        state,
+        {},
+        {
+            root: root,
+            left: left,
+            right: right,
+        },
+        ownership={
+            root: (right,),
+        },
+    )
+
+    assert result.destination.ownership == {
+        root: (right,),
+    }
+
+
+def test_transform_does_not_infer_ownership_from_entity_mapping() -> None:
+    root = EntityID("root")
+    child = EntityID("child")
+    new_root = EntityID("new_root")
+    new_child = EntityID("new_child")
+
+    state = State.create(
+        {
+            root: Value.create(root, 0),
+            child: Value.create(child, 1),
+        },
+        {
+            root: (child,),
+        },
+    )
+
+    try:
+        transform_with_mapping(
+            state,
+            {
+                new_root: 10,
+                new_child: 11,
+            },
+            {
+                root: new_root,
+                child: new_child,
+            },
+        )
+    except OwnershipError:
+        pass
+    else:
+        raise AssertionError(
+            "entity mapping implicitly transferred ownership"
+        )
+
+
+def test_transform_can_explicitly_preserve_ownership_after_rename() -> None:
+    root = EntityID("root")
+    child = EntityID("child")
+    new_root = EntityID("new_root")
+    new_child = EntityID("new_child")
+
+    state = State.create(
+        {
+            root: Value.create(root, 0),
+            child: Value.create(child, 1),
+        },
+        {
+            root: (child,),
+        },
+    )
+
+    result = transform_with_mapping(
+        state,
+        {
+            new_root: 10,
+            new_child: 11,
+        },
+        {
+            root: new_root,
+            child: new_child,
+        },
+        ownership={
+            new_root: (new_child,),
+        },
+    )
+
+    assert result.destination.ownership == {
+        new_root: (new_child,),
+    }
+
+    assert result.destination.owner_of(new_child) == new_root
+
+
+def test_transform_rejects_invalid_destination_ownership() -> None:
+    root = EntityID("root")
+    left = EntityID("left")
+    right = EntityID("right")
+
+    state = State.create(
+        {
+            root: Value.create(root, 0),
+            left: Value.create(left, 1),
+            right: Value.create(right, 2),
+        },
+        {
+            root: (left,),
+        },
+    )
+
+    try:
+        transform_with_mapping(
+            state,
+            {},
+            {
+                root: root,
+                left: left,
+                right: right,
+            },
+            ownership={
+                root: (right,),
+                left: (right,),
+            },
+        )
+    except OwnershipError:
+        pass
+    else:
+        raise AssertionError(
+            "transform accepted destination ownership with two owners"
+        )
+
+
+def test_transform_rejects_destination_ownership_cycle() -> None:
+    root = EntityID("root")
+    child = EntityID("child")
+    leaf = EntityID("leaf")
+
+    state = State.create(
+        {
+            root: Value.create(root, 0),
+            child: Value.create(child, 1),
+            leaf: Value.create(leaf, 2),
+        },
+    )
+
+    try:
+        transform_with_mapping(
+            state,
+            {},
+            {
+                root: root,
+                child: child,
+                leaf: leaf,
+            },
+            ownership={
+                root: (child,),
+                child: (leaf,),
+                leaf: (root,),
+            },
+        )
+    except OwnershipError:
+        pass
+    else:
+        raise AssertionError(
+            "transform accepted cyclic destination ownership"
+        )
+
+
+def test_transform_does_not_mutate_source_ownership() -> None:
+    root = EntityID("root")
+    child = EntityID("child")
+    sibling = EntityID("sibling")
+
+    state = State.create(
+        {
+            root: Value.create(root, 0),
+            child: Value.create(child, 1),
+            sibling: Value.create(sibling, 2),
+        },
+        {
+            root: (child,),
+        },
+    )
+
+    result = transform_with_mapping(
+        state,
+        {},
+        {
+            root: root,
+            child: child,
+            sibling: sibling,
+        },
+        ownership={
+            root: (sibling,),
+        },
+    )
+
+    assert state.ownership == {
+        root: (child,),
+    }
+
+    assert result.destination.ownership == {
+        root: (sibling,),
+    }
+
+
+def test_transform_changes_state_identity_when_ownership_changes() -> None:
+    root = EntityID("root")
+    child = EntityID("child")
+
+    state = State.create(
+        {
+            root: Value.create(root, 1),
+            child: Value.create(child, 2),
+        },
+        {
+            root: (child,),
+        },
+    )
+
+    result = transform_with_mapping(
+        state,
+        {},
+        {
+            root: root,
+            child: child,
+        },
+        ownership={},
+    )
+
+    assert result.destination.id != state.id
+
+
 def run_all_tests() -> None:
     test_entity_version_changes_when_content_changes()
     test_identical_entity_versions_have_identical_version_ids()
@@ -869,6 +1176,15 @@ def run_all_tests() -> None:
     test_destroy_child_preserves_owner_and_unrelated_entities()
     test_destroy_does_not_mutate_original_state()
     test_ordinary_reference_cycles_do_not_affect_ownership()
+    test_transform_preserves_ownership_when_entities_are_unchanged()
+    test_transform_can_explicitly_remove_ownership()
+    test_transform_can_explicitly_change_ownership()
+    test_transform_does_not_infer_ownership_from_entity_mapping()
+    test_transform_can_explicitly_preserve_ownership_after_rename()
+    test_transform_rejects_invalid_destination_ownership()
+    test_transform_rejects_destination_ownership_cycle()
+    test_transform_does_not_mutate_source_ownership()
+    test_transform_changes_state_identity_when_ownership_changes()
 
 
 if __name__ == "__main__":
