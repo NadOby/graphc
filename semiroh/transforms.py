@@ -78,8 +78,17 @@ def transform_with_mapping(
     changes: Mapping[EntityID, Any],
     entity_mappings: Mapping[EntityID, EntityID],
     provenance: Any = None,
+    ownership: Mapping[EntityID, Any] | None = None,
 ) -> TransformResult:
-    """Produce a new state and an explicit transition mapping."""
+    """Produce a new state and an explicit transition mapping.
+
+    If ownership is omitted, the existing ownership relation is preserved
+    literally. Entity mappings do not implicitly rename or otherwise modify
+    ownership relations.
+
+    An explicit empty ownership mapping removes all ownership relations from
+    the destination state.
+    """
 
     values = dict(state.values)
 
@@ -102,7 +111,16 @@ def transform_with_mapping(
                 f"destination state"
             )
 
-    destination = State.create(values)
+    destination_ownership = (
+        state.ownership
+        if ownership is None
+        else ownership
+    )
+
+    destination = State.create(
+        values,
+        destination_ownership,
+    )
 
     mappings = tuple(
         EntityMapping(
