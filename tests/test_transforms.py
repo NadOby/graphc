@@ -12,7 +12,9 @@ from semiroh import (
 
 
 class TransformTests(unittest.TestCase):
-    def test_state_identity_ignores_transition_mapping(self) -> None:
+    def test_state_identity_reflects_entity_mapping_effect(
+        self,
+    ) -> None:
         foo = EntityID("foo")
         bar = EntityID("bar")
 
@@ -32,7 +34,7 @@ class TransformTests(unittest.TestCase):
             {},
         )
 
-        self.assertEqual(
+        self.assertNotEqual(
             result_a.destination.id,
             result_b.destination.id,
         )
@@ -71,9 +73,7 @@ class TransformTests(unittest.TestCase):
 
         self.assertEqual(
             result.destination.ownership,
-            {
-                root: (child,),
-            },
+            {},
         )
 
     def test_transform_can_explicitly_remove_ownership(self) -> None:
@@ -172,15 +172,22 @@ class TransformTests(unittest.TestCase):
 
         self.assertEqual(
             result.destination.ownership,
-            {
-                root: (child,),
-            },
+            {},
         )
 
-        self.assertEqual(
-            result.destination.owner_of(child),
-            root,
+        self.assertFalse(
+            result.destination.contains(root),
         )
+        self.assertFalse(
+            result.destination.contains(child),
+        )
+        self.assertTrue(
+            result.destination.contains(new_root),
+        )
+        self.assertTrue(
+            result.destination.contains(new_child),
+        )
+
         self.assertIsNone(
             result.destination.owner_of(new_child)
         )
