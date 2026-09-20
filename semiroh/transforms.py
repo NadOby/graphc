@@ -172,9 +172,25 @@ class TransformationDefinition:
     ) -> "TransformResult":
         """Apply the definition and produce an immutable transformation result.
 
-        Explicit mappings determine continuity. A source mapped to an empty
-        destination tuple disappears. Destination entities without incoming
-        mappings are newly created entities.
+        The transformation is partial.
+
+        Unmapped source entities are preserved. Explicitly mapped source
+        entities are removed from their source representation and represented
+        only by their mapped destination entities. Therefore:
+
+            A -> ()      disappearance
+            A -> A       explicit continuity
+            A -> B       explicit continuation under a new entity
+            A -> (B, C)  split
+            A, B -> C    merge
+
+        Value changes independently replace existing values or create new
+        destination entities when the changed entity was absent from the
+        source state.
+
+        Destination entities without incoming mappings are newly created
+        entities unless they are preserved by an unchanged source entity with
+        the same EntityID.
         """
 
         values = dict(state.values)
@@ -183,7 +199,7 @@ class TransformationDefinition:
             values[change.entity] = change.value
 
         normalized_mappings: list[EntityMapping] = []
-        disappeared: set[EntityID] = set()
+        explicitly_mapped: set[EntityID] = set()
 
         for mapping in self.mappings:
             source_entity = mapping.source_entity
@@ -194,8 +210,9 @@ class TransformationDefinition:
                     f"{state.id.value}"
                 )
 
+            explicitly_mapped.add(source_entity)
+
             if not mapping.destination_entities:
-                disappeared.add(source_entity)
                 normalized_mappings.append(
                     EntityMapping(
                         source_state=state.id,
@@ -222,18 +239,53 @@ class TransformationDefinition:
                 )
             )
 
-        for entity in disappeared:
+        # An explicit mapping determines the source entity's destination
+        # representation. Unmapped source entities remain preserved.
+        for entity in explicitly_mapped:
             values.pop(entity, None)
+
+        # Reintroduce explicitly mapped entities only when their destination
+        # set explicitly contains the same EntityID. This makes A -> A
+        # explicit continuity while A -> B removes A from the destination.
+        for mapping in self.mappings:
+            if mapping.source_entity in mapping.destination_entities:
+                source_entity = mapping.source_entity
+
+                if source_entity not in values:
+                    source_value = state.values[source_entity]
+
+                    change = next(
+                        (
+                            change
+                            for change in self.changes
+                            if change.entity == source_entity
+                        ),
+                        None,
+                    )
+
+                    if change is not None:
+                        values[source_entity] = change.value
+                    else:
+                        values[source_entity] = source_value
+
+        disappeared = {
+            mapping.source_entity
+            for mapping in self.mappings
+            if not mapping.destination_entities
+        }
 
         if ownership is None:
             destination_ownership = {
                 owner: tuple(
                     child
                     for child in children
-                    if child not in disappeared
+                    if (
+                        owner not in explicitly_mapped
+                        and child not in explicitly_mapped
+                    )
                 )
                 for owner, children in state.ownership.items()
-                if owner not in disappeared
+                if owner not in explicitly_mapped
             }
 
             destination_ownership = {
