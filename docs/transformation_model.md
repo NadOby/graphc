@@ -95,7 +95,57 @@ changes the semantic value while retaining the entity in the destination.
 Whether `E` is considered continuous across the transition is determined by
 the explicit continuity mapping.
 
-## 4. Transformation mappings
+## 4. Partial transformation semantics
+
+A transformation definition is a partial description of changes to a source
+state.
+
+For every entity in the source state, its treatment is determined as follows:
+
+    explicitly mapped
+        → continuity or disappearance is declared by the mapping
+
+    not explicitly mapped
+        → the entity is preserved in the destination state
+
+Preservation of an entity in the destination does not itself assert identity
+continuity.
+
+Therefore an unmentioned entity may remain present with the same `EntityID`
+and value while having no `EntityMapping` in the transformation result.
+
+This distinction is intentional:
+
+    state preservation
+        ≠
+    declared continuity
+
+The absence of a mapping must not manufacture continuity.
+
+For an entity explicitly changed but not mapped:
+
+    existing source entity
+        →
+    changed destination value
+    with no declared continuity mapping
+
+For an entity explicitly changed and mapped:
+
+    existing source entity
+        →
+    changed destination value
+    with explicitly declared continuity
+
+For an entity explicitly mapped to zero destinations:
+
+    source entity
+        →
+    disappearance
+
+An explicit disappearance mapping therefore takes precedence over a value
+change for the same source entity: the entity is absent from the destination.
+
+## 5. Transformation mappings
 
 A transformation definition may contain explicit continuity mappings.
 
@@ -128,7 +178,7 @@ Therefore the relation supports:
 
 The mapping is a relation, not an assertion of semantic equality.
 
-## 5. Applying a transformation definition
+## 6. Applying a transformation definition
 
 Applying a definition validates its mapping against the source and produced
 destination state.
@@ -143,6 +193,9 @@ Destination entities may be introduced by the definition's changes.
 A source mapped to an empty destination tuple disappears from the destination
 state.
 
+A source entity that is not explicitly mapped remains in the destination
+state, subject to any value change explicitly specified for that entity.
+
 A destination entity with no incoming mapping is a newly created destination
 entity.
 
@@ -152,10 +205,11 @@ Creation therefore has no synthetic source entity:
 
 Creation is not identity transfer from an implicit predecessor.
 
-A transformation result contains the concrete source-state mapping produced
-from the reusable definition.
+A transformation result contains only explicitly declared continuity mappings.
+It does not contain implicit mappings for entities merely because they happen
+to exist in both source and destination states.
 
-## 6. Plain transformations
+## 7. Plain transformations
 
 A transformation without an explicit continuity mapping changes semantic state
 content without asserting which entities are continuous across the transition.
@@ -171,7 +225,7 @@ It does not establish identity continuity.
 A caller must not infer continuity merely because the same `EntityID` appears
 in both states.
 
-## 7. References
+## 8. References
 
 A `Reference` is bound to:
 
@@ -190,7 +244,7 @@ Reference resolution against a state requires:
 2. the referenced entity to exist in that state; and
 3. the reference's `VersionID` to equal the current version of that entity.
 
-## 8. Reference transfer
+## 9. Reference transfer
 
 Reference transfer is strictly state-local and one-step.
 
@@ -235,10 +289,13 @@ destination entity.
 A source mapped to multiple destinations cannot be transferred without an
 explicit choice and therefore produces `AmbiguousEntityMapping`.
 
+An unmentioned source entity has no declared continuity mapping and therefore
+cannot be transferred through the transformation.
+
 The resulting reference is bound to the destination state and the current
 version of the mapped destination entity.
 
-## 9. Transformation composition
+## 10. Transformation composition
 
 Transformations are not implicitly composable for reference transfer.
 
@@ -262,10 +319,10 @@ This prevents a transformation mapping from becoming an implicit global
 provenance/history graph.
 
 Composition of transformations may be introduced as a separate semantic
-operation, but it is not implied merely by having transformations whose states
-form a chain.
+operation, but it is not implied merely by having transformations whose
+states form a chain.
 
-## 10. Rebinding
+## 11. Rebinding
 
 Rebinding is distinct from reference transfer.
 
@@ -284,7 +341,7 @@ Conceptually:
 
 Rebinding therefore does not preserve conceptual identity.
 
-## 11. Ownership
+## 12. Ownership
 
 Ownership is part of semantic state content.
 
@@ -306,7 +363,7 @@ ownership relation directly and must refer only to destination entities.
 
 Ownership and ordinary entity continuity are therefore separate relations.
 
-## 12. State identity
+## 13. State identity
 
 State identity is derived from semantic state content.
 
@@ -321,7 +378,7 @@ different state identities for that reason.
 Conversely, changing semantic state content or ownership changes the state
 identity when the resulting semantic content differs.
 
-## 13. Canonicalization and determinism
+## 14. Canonicalization and determinism
 
 The representation of transformation mappings is canonical.
 
@@ -339,7 +396,7 @@ same canonical mapping representation.
 This ordering is semantic determinism, not an assertion that the ordering
 itself represents an additional relationship between entities.
 
-## 14. Mapping validation
+## 15. Mapping validation
 
 A valid transformation mapping must satisfy:
 
@@ -355,7 +412,7 @@ Invalid transition mappings must be rejected rather than silently normalized
 into a different semantic relation, except where canonical ordering is an
 explicitly supported normalization.
 
-## 15. Provenance
+## 16. Provenance
 
 Provenance is metadata associated with a transformation.
 
@@ -367,7 +424,7 @@ history graph.
 A future provenance model may define richer historical relationships, but such
 relationships must not be inferred from ordinary entity mappings.
 
-## 16. Reversibility
+## 17. Reversibility
 
 A transformation mapping describes forward continuity.
 
@@ -390,14 +447,16 @@ not implied merely by applying an apparent inverse transformation.
 A future reversible-transformation model must specify its own requirements for
 invertibility and information preservation.
 
-## 17. Semantic versus implementation concerns
+## 18. Semantic versus implementation concerns
 
 The following are semantic requirements:
 
 - immutable source and destination states;
 - explicit continuity mappings;
-- zero/one/many mapping cardinality;
+- partial transformation semantics;
+- explicit zero/one/many mapping cardinality;
 - explicit creation and disappearance;
+- preservation of unmentioned entities without implicit continuity;
 - state-local, version-aware reference transfer;
 - distinction between transfer and rebinding;
 - separation of ownership from continuity;
@@ -417,12 +476,12 @@ The following are implementation choices unless separately specified:
 Tests must target the semantic contract rather than incidental implementation
 details.
 
-## 18. Current unresolved areas
+## 19. Current unresolved areas
 
 The following are intentionally not fully specified yet:
 
-- the complete semantics of unspecified source entities in a transformation;
-- whether a transformation is itself a first-class semantic value;
+- whether a transformation is itself a first-class semantic value beyond its
+  current definition/result distinction;
 - transformation identity and equality;
 - formal composition of transformations and composed continuity mappings;
 - formal distinction between lossless and lossy transformations;
@@ -434,15 +493,19 @@ The following are intentionally not fully specified yet:
 
 These questions must be resolved before they are treated as stable semantics.
 
-## 19. Design principle
+## 20. Design principle
 
 A transformation is an explicit semantic transition between immutable states.
 
-An entity's continuity across that transition exists only where the transition
+A transformation definition describes only the entities it explicitly changes
+or maps. Entities not mentioned by the definition are preserved as state
+content, but their continuity is not implicitly declared.
+
+An entity's continuity across a transition exists only where the transition
 explicitly declares it.
 
 A reference follows one such declaration at a time.
 
-Neither `EntityID` reuse, structural similarity, state adjacency, nor historical
-provenance is sufficient to manufacture continuity that the transformation
-did not declare.
+Neither `EntityID` reuse, structural similarity, state adjacency, preservation
+of state content, nor historical provenance is sufficient to manufacture
+continuity that the transformation did not declare.
