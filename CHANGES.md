@@ -58,3 +58,20 @@ semantic decisions and milestones rather than individual commits.
 
 Architectural decisions will be added here when they become sufficiently
 stable to form part of the SEMIROH semantic model.
+
+## 2026-09-20
+
+### Session: Repository refactor
+
+- Refactored the executable test suite from a monolithic test module into
+  thematic `unittest` modules under `tests/`.
+- Separated tests by semantic concern: identity, canonicalization, references,
+  state, ownership, lifecycle, transformations, and continuity.
+- Switched the test suite to standard `unittest` discovery.
+- Updated GitHub Actions validation to discover tests from the `tests/` package.
+- Removed the obsolete root-level test module after its tests were migrated.
+- Removed the obsolete `identity_model.py` compatibility facade now that the
+  package implementation is the direct semantic reference model.
+- Preserved the existing semantic behavior while restructuring the executable
+  test architecture.
+- Established the development changelog as append-only for subsequent entries.
