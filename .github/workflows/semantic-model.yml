@@ -3,15 +3,13 @@ name: Semantic model
 on:
   push:
     paths:
-      - "identity_model.py"
       - "semiroh/**"
-      - "test_identity_model.py"
+      - "tests/**"
       - ".github/workflows/semantic-model.yml"
   pull_request:
     paths:
-      - "identity_model.py"
       - "semiroh/**"
-      - "test_identity_model.py"
+      - "tests/**"
       - ".github/workflows/semantic-model.yml"
 
 jobs:
@@ -28,4 +26,4 @@ jobs:
           python-version: "3.12"
 
       - name: Run semantic model tests
-        run: python identity_model.py
+        run: python -m unittest discover -v
