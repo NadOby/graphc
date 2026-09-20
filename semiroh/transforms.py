@@ -139,10 +139,16 @@ class TransformationDefinition:
                 (
                     TransformationMapping(
                         source_entity=source_entity,
-                        destination_entities=(
-                            (destination_spec,)
-                            if isinstance(destination_spec, EntityID)
-                            else tuple(destination_spec)
+                        destination_entities=tuple(
+                            sorted(
+                                (
+                                    destination_spec,
+                                )
+                            )
+                        )
+                        if isinstance(destination_spec, EntityID)
+                        else tuple(
+                            sorted(destination_spec)
                         ),
                     )
                     for source_entity, destination_spec in (
@@ -505,4 +511,4 @@ def rebind_reference(
         state=destination.id,
         entity=destination_entity,
         version=version_id_for(destination_value),
-        )
+    )
