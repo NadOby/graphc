@@ -456,7 +456,7 @@ class TransformMappingTests(unittest.TestCase):
             (destination,),
         )
 
-    def test_transition_mapping_does_not_affect_destination_state_identity(
+    def test_transition_mapping_affects_destination_state_identity(
         self,
     ) -> None:
         source = EntityID("source")
@@ -484,12 +484,14 @@ class TransformMappingTests(unittest.TestCase):
             {},
         )
 
-        self.assertEqual(
+        self.assertNotEqual(
             mapped.destination.id,
             unmapped.destination.id,
         )
 
-    def test_transition_mapping_does_not_modify_ownership(self) -> None:
+    def test_transition_mapping_does_not_preserve_ownership_implicitly(
+        self,
+    ) -> None:
         source = EntityID("source")
         destination = EntityID("destination")
         child = EntityID("child")
@@ -515,9 +517,16 @@ class TransformMappingTests(unittest.TestCase):
 
         self.assertEqual(
             result.destination.ownership,
-            {
-                source: (child,),
-            },
+            {},
+        )
+        self.assertFalse(
+            result.destination.contains(source),
+        )
+        self.assertTrue(
+            result.destination.contains(destination),
+        )
+        self.assertTrue(
+            result.destination.contains(child),
         )
 
     def test_transform_result_rejects_mapping_for_wrong_source_state(
