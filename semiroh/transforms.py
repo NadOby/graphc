@@ -179,15 +179,19 @@ def transform_with_mapping(
     A destination entity may also be named by multiple source mappings,
     allowing many-to-one continuity.
 
+    A source entity mapped to an empty tuple disappears from the destination
+    state.
+
+    Destination entities with no incoming mapping are newly created entities.
+    Creation therefore requires no synthetic source-side entity.
+
     If ownership is omitted, the existing ownership relation is preserved
-    literally. Entity mappings do not implicitly rename or otherwise modify
-    ownership relations.
+    except for edges involving entities that disappear.
 
-    An explicit empty ownership mapping removes all ownership relations from
-    the destination state.
+    An explicit ownership mapping is used literally as the destination
+    ownership relation. It must therefore reference only destination entities.
 
-    A mapping to an empty destination tuple represents disappearance. In that
-    case the source entity must actually be absent from the destination state.
+    Entity mappings do not implicitly modify ownership.
     """
 
     values = dict(state.values)
@@ -199,6 +203,7 @@ def transform_with_mapping(
         )
 
     normalized_mappings: list[EntityMapping] = []
+    disappeared: set[EntityID] = set()
 
     for source_entity, destination_spec in entity_mappings.items():
         if source_entity not in state.values:
@@ -220,18 +225,15 @@ def transform_with_mapping(
                 f"{source_entity.value}"
             )
 
-        if not destination_entities and source_entity in values:
-            raise ValueError(
-                f"disappearing entity {source_entity.value} "
-                f"is still present in destination state"
-            )
-
-        for destination_entity in destination_entities:
-            if destination_entity not in values:
-                raise KeyError(
-                    f"{destination_entity.value} is absent from "
-                    f"destination state"
-                )
+        if not destination_entities:
+            disappeared.add(source_entity)
+        else:
+            for destination_entity in destination_entities:
+                if destination_entity not in values:
+                    raise KeyError(
+                        f"{destination_entity.value} is absent from "
+                        f"destination state"
+                    )
 
         normalized_mappings.append(
             EntityMapping(
@@ -243,11 +245,27 @@ def transform_with_mapping(
             )
         )
 
-    destination_ownership = (
-        state.ownership
-        if ownership is None
-        else ownership
-    )
+    for entity in disappeared:
+        values.pop(entity, None)
+
+    if ownership is None:
+        destination_ownership = {
+            owner: tuple(
+                child
+                for child in children
+                if child not in disappeared
+            )
+            for owner, children in state.ownership.items()
+            if owner not in disappeared
+        }
+
+        destination_ownership = {
+            owner: children
+            for owner, children in destination_ownership.items()
+            if children
+        }
+    else:
+        destination_ownership = ownership
 
     destination = State.create(
         values,
