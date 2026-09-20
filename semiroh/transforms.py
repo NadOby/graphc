@@ -18,6 +18,89 @@ from .values import Value, version_id_for
 
 
 @dataclass(frozen=True)
+class EntityChange:
+    """Immutable replacement of one entity's semantic value."""
+
+    entity: EntityID
+    value: Value
+
+    def __post_init__(self) -> None:
+        if self.value.entity != self.entity:
+            raise ValueError(
+                f"value entity {self.value.entity.value} does not match "
+                f"change entity {self.entity.value}"
+            )
+
+
+@dataclass(frozen=True)
+class TransformationDefinition:
+    """Immutable semantic definition of a state transformation.
+
+    The current definition models semantic value changes only. Continuity
+    mappings, ownership transitions, constraints, effects, capabilities, and
+    provenance remain separate parts of the transformation model until they
+    are explicitly specified.
+    """
+
+    changes: tuple[EntityChange, ...]
+
+    def __post_init__(self) -> None:
+        entities = tuple(
+            change.entity
+            for change in self.changes
+        )
+
+        if len(entities) != len(set(entities)):
+            raise ValueError(
+                "multiple changes for the same entity"
+            )
+
+        if entities != tuple(sorted(entities)):
+            raise ValueError(
+                "changes are not canonically ordered"
+            )
+
+    @staticmethod
+    def create(
+        changes: Mapping[EntityID, Any],
+    ) -> "TransformationDefinition":
+        """Create an immutable transformation definition from value changes."""
+
+        normalized = tuple(
+            sorted(
+                (
+                    EntityChange(
+                        entity=entity,
+                        value=Value(
+                            entity,
+                            content,
+                        ),
+                    )
+                    for entity, content in changes.items()
+                ),
+                key=lambda change: change.entity,
+            )
+        )
+
+        return TransformationDefinition(
+            changes=normalized,
+        )
+
+    def apply(
+        self,
+        state: State,
+    ) -> State:
+        """Apply the value changes and produce a new immutable state."""
+
+        return state.with_changes(
+            {
+                change.entity: change.value.content
+                for change in self.changes
+            }
+        )
+
+
+@dataclass(frozen=True)
 class EntityMapping:
     """Explicit continuity relation from one source entity to zero or more destinations."""
 
@@ -166,7 +249,10 @@ def transform(
 
 def transform_with_mapping(
     state: State,
-    changes: Mapping[EntityID, Any],
+    changes: Mapping[
+        EntityID,
+        Any,
+    ],
     entity_mappings: Mapping[
         EntityID,
         EntityID | tuple[EntityID, ...],
@@ -367,4 +453,4 @@ def rebind_reference(
         state=destination.id,
         entity=destination_entity,
         version=version_id_for(destination_value),
-                                         )
+                )
