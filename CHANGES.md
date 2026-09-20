@@ -75,3 +75,27 @@ stable to form part of the SEMIROH semantic model.
 - Preserved the existing semantic behavior while restructuring the executable
   test architecture.
 - Established the development changelog as append-only for subsequent entries.
+
+### Transformation model specification
+
+- Defined transformations as explicit transitions between immutable semantic
+  states.
+- Defined explicit entity continuity as a zero/one/many relation supporting
+  disappearance, creation, split, merge, and many-to-many mappings.
+- Distinguished an absent mapping from an explicit mapping to zero
+  destinations.
+- Defined state-local, one-step reference transfer with validation of
+  `StateID`, entity existence, and exact `VersionID`.
+- Defined explicit distinction between continuity-preserving reference
+  transfer and destination-state rebinding.
+- Established that transformation mappings and provenance do not contribute to
+  `StateID`.
+- Established canonical ordering and validation requirements for transition
+  mappings.
+- Separated ownership transformation semantics from entity continuity.
+- Documented composition and reversibility as distinct concerns rather than
+  implicit properties of individual transformations.
+- Added `docs/transformation_model.md` as the authoritative specification for
+  the current transformation model.
+- Marked unresolved transformation semantics explicitly rather than
+  prematurely defining them through implementation or tests.
