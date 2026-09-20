@@ -46,7 +46,11 @@ class TransformationDefinitionTests(unittest.TestCase):
                 change.entity
                 for change in first.changes
             ),
-            (foo, bar),
+            tuple(
+                sorted(
+                    (foo, bar)
+                )
+            ),
         )
 
     def test_change_contains_immutable_semantic_value(self) -> None:
