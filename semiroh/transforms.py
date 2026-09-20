@@ -36,6 +36,66 @@ class TransformResult:
     mappings: tuple[EntityMapping, ...]
     provenance: Any = None
 
+    def __post_init__(self) -> None:
+        """Validate structural invariants of the transition mapping."""
+
+        seen_sources: set[EntityID] = set()
+
+        for mapping in self.mappings:
+            if mapping.source_state != self.source.id:
+                raise ValueError(
+                    f"mapping source state {mapping.source_state.value} "
+                    f"does not match source state {self.source.id.value}"
+                )
+
+            if mapping.source_entity not in self.source.values:
+                raise ValueError(
+                    f"mapping source entity {mapping.source_entity.value} "
+                    f"is absent from source state"
+                )
+
+            if mapping.source_entity in seen_sources:
+                raise ValueError(
+                    f"multiple mapping records for "
+                    f"{mapping.source_entity.value}"
+                )
+
+            seen_sources.add(mapping.source_entity)
+
+            if len(mapping.destination_entities) != len(
+                set(mapping.destination_entities)
+            ):
+                raise ValueError(
+                    f"duplicate destination entities in mapping from "
+                    f"{mapping.source_entity.value}"
+                )
+
+            if tuple(sorted(mapping.destination_entities)) != (
+                mapping.destination_entities
+            ):
+                raise ValueError(
+                    f"destination entities for {mapping.source_entity.value} "
+                    f"are not canonically ordered"
+                )
+
+            for destination_entity in mapping.destination_entities:
+                if destination_entity not in self.destination.values:
+                    raise ValueError(
+                        f"mapping destination entity "
+                        f"{destination_entity.value} is absent from "
+                        f"destination state"
+                    )
+
+        if tuple(
+            sorted(
+                self.mappings,
+                key=lambda mapping: mapping.source_entity,
+            )
+        ) != self.mappings:
+            raise ValueError(
+                "entity mappings are not canonically ordered"
+            )
+
     def mapped_entities(
         self,
         reference: Reference,
@@ -125,6 +185,9 @@ def transform_with_mapping(
 
     An explicit empty ownership mapping removes all ownership relations from
     the destination state.
+
+    A mapping to an empty destination tuple represents disappearance. In that
+    case the source entity must actually be absent from the destination state.
     """
 
     values = dict(state.values)
@@ -155,6 +218,12 @@ def transform_with_mapping(
             raise ValueError(
                 f"duplicate destination entities in mapping from "
                 f"{source_entity.value}"
+            )
+
+        if not destination_entities and source_entity in values:
+            raise ValueError(
+                f"disappearing entity {source_entity.value} "
+                f"is still present in destination state"
             )
 
         for destination_entity in destination_entities:
@@ -251,4 +320,4 @@ def rebind_reference(
         state=destination.id,
         entity=destination_entity,
         version=version_id_for(destination_value),
-    )
+        )
