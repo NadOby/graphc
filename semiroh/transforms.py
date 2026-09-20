@@ -8,8 +8,10 @@ from typing import Any, Mapping
 from .identity import EntityID, StateID
 from .references import (
     AmbiguousEntityMapping,
+    CrossStateReference,
     MissingEntityMapping,
     Reference,
+    StaleReference,
 )
 from .state import State
 from .values import Value, version_id_for
@@ -291,7 +293,34 @@ def transfer_reference(
     reference: Reference,
     result: TransformResult,
 ) -> Reference:
-    """Transfer a reference through a uniquely resolving mapping."""
+    """Transfer a valid source reference through a uniquely resolving mapping.
+
+    The reference must identify the exact value present in the transition's
+    source state. Mapping by EntityID alone is insufficient because references
+    are also pinned to a specific VersionID.
+    """
+
+    if reference.state != result.source.id:
+        raise CrossStateReference(
+            f"reference belongs to {reference.state.value}, "
+            f"not {result.source.id.value}"
+        )
+
+    try:
+        source_value = result.source.values[reference.entity]
+    except KeyError as exc:
+        raise KeyError(
+            f"{reference.entity.value} is absent from "
+            f"{result.source.id.value}"
+        ) from exc
+
+    actual_source_version = version_id_for(source_value)
+
+    if actual_source_version != reference.version:
+        raise StaleReference(
+            f"reference expects version {reference.version.value}, "
+            f"but source state contains {actual_source_version.value}"
+        )
 
     destination_entity = result.mapped_entity(reference)
 
@@ -338,4 +367,4 @@ def rebind_reference(
         state=destination.id,
         entity=destination_entity,
         version=version_id_for(destination_value),
-        )
+                                         )
