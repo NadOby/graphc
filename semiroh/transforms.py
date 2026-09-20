@@ -33,40 +33,92 @@ class EntityChange:
 
 
 @dataclass(frozen=True)
+class TransformationMapping:
+    """Immutable continuity mapping used by a transformation definition.
+
+    Unlike EntityMapping, this mapping is independent of any particular
+    source state and can therefore belong to a reusable transformation
+    definition.
+    """
+
+    source_entity: EntityID
+    destination_entities: tuple[EntityID, ...]
+
+    def __post_init__(self) -> None:
+        if len(self.destination_entities) != len(
+            set(self.destination_entities)
+        ):
+            raise ValueError(
+                f"duplicate destination entities in mapping from "
+                f"{self.source_entity.value}"
+            )
+
+        if tuple(sorted(self.destination_entities)) != (
+            self.destination_entities
+        ):
+            raise ValueError(
+                f"destination entities for {self.source_entity.value} "
+                f"are not canonically ordered"
+            )
+
+
+@dataclass(frozen=True)
 class TransformationDefinition:
     """Immutable semantic definition of a state transformation.
 
-    The current definition models semantic value changes only. Continuity
-    mappings, ownership transitions, constraints, effects, capabilities, and
-    provenance remain separate parts of the transformation model until they
-    are explicitly specified.
+    The definition is independent of a particular source state. It describes
+    semantic value changes and explicit entity continuity.
+
+    Constraints, effects, capabilities, ownership transitions, and provenance
+    remain separate parts of the transformation model until they are explicitly
+    specified.
     """
 
     changes: tuple[EntityChange, ...]
+    mappings: tuple[TransformationMapping, ...]
 
     def __post_init__(self) -> None:
-        entities = tuple(
+        change_entities = tuple(
             change.entity
             for change in self.changes
         )
 
-        if len(entities) != len(set(entities)):
+        if len(change_entities) != len(set(change_entities)):
             raise ValueError(
                 "multiple changes for the same entity"
             )
 
-        if entities != tuple(sorted(entities)):
+        if change_entities != tuple(sorted(change_entities)):
             raise ValueError(
                 "changes are not canonically ordered"
             )
 
+        mapping_entities = tuple(
+            mapping.source_entity
+            for mapping in self.mappings
+        )
+
+        if len(mapping_entities) != len(set(mapping_entities)):
+            raise ValueError(
+                "multiple mappings for the same source entity"
+            )
+
+        if mapping_entities != tuple(sorted(mapping_entities)):
+            raise ValueError(
+                "mappings are not canonically ordered"
+            )
+
     @staticmethod
     def create(
-        changes: Mapping[EntityID, Any],
+        changes: Mapping[EntityID, Any] | None = None,
+        mappings: Mapping[
+            EntityID,
+            EntityID | tuple[EntityID, ...],
+        ] | None = None,
     ) -> "TransformationDefinition":
-        """Create an immutable transformation definition from value changes."""
+        """Create an immutable transformation definition."""
 
-        normalized = tuple(
+        normalized_changes = tuple(
             sorted(
                 (
                     EntityChange(
@@ -76,27 +128,128 @@ class TransformationDefinition:
                             content,
                         ),
                     )
-                    for entity, content in changes.items()
+                    for entity, content in (changes or {}).items()
                 ),
                 key=lambda change: change.entity,
             )
         )
 
+        normalized_mappings = tuple(
+            sorted(
+                (
+                    TransformationMapping(
+                        source_entity=source_entity,
+                        destination_entities=(
+                            (destination_spec,)
+                            if isinstance(destination_spec, EntityID)
+                            else tuple(destination_spec)
+                        ),
+                    )
+                    for source_entity, destination_spec in (
+                        mappings or {}
+                    ).items()
+                ),
+                key=lambda mapping: mapping.source_entity,
+            )
+        )
+
         return TransformationDefinition(
-            changes=normalized,
+            changes=normalized_changes,
+            mappings=normalized_mappings,
         )
 
     def apply(
         self,
         state: State,
-    ) -> State:
-        """Apply the value changes and produce a new immutable state."""
+        provenance: Any = None,
+        ownership: Mapping[EntityID, Any] | None = None,
+    ) -> "TransformResult":
+        """Apply the definition and produce an immutable transformation result.
 
-        return state.with_changes(
-            {
-                change.entity: change.value.content
-                for change in self.changes
+        Explicit mappings determine continuity. A source mapped to an empty
+        destination tuple disappears. Destination entities without incoming
+        mappings are newly created entities.
+        """
+
+        values = dict(state.values)
+
+        for change in self.changes:
+            values[change.entity] = change.value
+
+        normalized_mappings: list[EntityMapping] = []
+        disappeared: set[EntityID] = set()
+
+        for mapping in self.mappings:
+            source_entity = mapping.source_entity
+
+            if source_entity not in state.values:
+                raise KeyError(
+                    f"{source_entity.value} is absent from "
+                    f"{state.id.value}"
+                )
+
+            if not mapping.destination_entities:
+                disappeared.add(source_entity)
+                normalized_mappings.append(
+                    EntityMapping(
+                        source_state=state.id,
+                        source_entity=source_entity,
+                        destination_entities=(),
+                    )
+                )
+                continue
+
+            for destination_entity in mapping.destination_entities:
+                if destination_entity not in values:
+                    raise KeyError(
+                        f"{destination_entity.value} is absent from "
+                        f"destination state"
+                    )
+
+            normalized_mappings.append(
+                EntityMapping(
+                    source_state=state.id,
+                    source_entity=source_entity,
+                    destination_entities=(
+                        mapping.destination_entities
+                    ),
+                )
+            )
+
+        for entity in disappeared:
+            values.pop(entity, None)
+
+        if ownership is None:
+            destination_ownership = {
+                owner: tuple(
+                    child
+                    for child in children
+                    if child not in disappeared
+                )
+                for owner, children in state.ownership.items()
+                if owner not in disappeared
             }
+
+            destination_ownership = {
+                owner: children
+                for owner, children in destination_ownership.items()
+                if children
+            }
+        else:
+            destination_ownership = ownership
+
+        destination = State.create(
+            values,
+            destination_ownership,
+        )
+
+        return TransformResult(
+            source=state,
+            destination=destination,
+            mappings=tuple(
+                normalized_mappings
+            ),
+            provenance=provenance,
         )
 
 
@@ -260,118 +413,17 @@ def transform_with_mapping(
     provenance: Any = None,
     ownership: Mapping[EntityID, Any] | None = None,
 ) -> TransformResult:
-    """Produce a new state and an explicit continuity mapping.
+    """Produce a state transition with an explicit continuity mapping."""
 
-    Each source entity may map to zero, one, or many destination entities.
-
-    A destination entity may also be named by multiple source mappings,
-    allowing many-to-one continuity.
-
-    A source entity mapped to an empty tuple disappears from the destination
-    state.
-
-    Destination entities with no incoming mapping are newly created entities.
-    Creation therefore requires no synthetic source-side entity.
-
-    If ownership is omitted, the existing ownership relation is preserved
-    except for edges involving entities that disappear.
-
-    An explicit ownership mapping is used literally as the destination
-    ownership relation. It must therefore reference only destination entities.
-
-    Entity mappings do not implicitly modify ownership.
-    """
-
-    values = dict(state.values)
-
-    for entity, content in changes.items():
-        values[entity] = Value(
-            entity,
-            content,
-        )
-
-    normalized_mappings: list[EntityMapping] = []
-    disappeared: set[EntityID] = set()
-
-    for source_entity, destination_spec in entity_mappings.items():
-        if source_entity not in state.values:
-            raise KeyError(
-                f"{source_entity.value} is absent from "
-                f"{state.id.value}"
-            )
-
-        if isinstance(destination_spec, EntityID):
-            destination_entities = (destination_spec,)
-        else:
-            destination_entities = tuple(destination_spec)
-
-        if len(destination_entities) != len(
-            set(destination_entities)
-        ):
-            raise ValueError(
-                f"duplicate destination entities in mapping from "
-                f"{source_entity.value}"
-            )
-
-        if not destination_entities:
-            disappeared.add(source_entity)
-        else:
-            for destination_entity in destination_entities:
-                if destination_entity not in values:
-                    raise KeyError(
-                        f"{destination_entity.value} is absent from "
-                        f"destination state"
-                    )
-
-        normalized_mappings.append(
-            EntityMapping(
-                source_state=state.id,
-                source_entity=source_entity,
-                destination_entities=tuple(
-                    sorted(destination_entities)
-                ),
-            )
-        )
-
-    for entity in disappeared:
-        values.pop(entity, None)
-
-    if ownership is None:
-        destination_ownership = {
-            owner: tuple(
-                child
-                for child in children
-                if child not in disappeared
-            )
-            for owner, children in state.ownership.items()
-            if owner not in disappeared
-        }
-
-        destination_ownership = {
-            owner: children
-            for owner, children in destination_ownership.items()
-            if children
-        }
-    else:
-        destination_ownership = ownership
-
-    destination = State.create(
-        values,
-        destination_ownership,
+    definition = TransformationDefinition.create(
+        changes=changes,
+        mappings=entity_mappings,
     )
 
-    mappings = tuple(
-        sorted(
-            normalized_mappings,
-            key=lambda mapping: mapping.source_entity,
-        )
-    )
-
-    return TransformResult(
-        source=state,
-        destination=destination,
-        mappings=mappings,
+    return definition.apply(
+        state,
         provenance=provenance,
+        ownership=ownership,
     )
 
 
@@ -453,4 +505,4 @@ def rebind_reference(
         state=destination.id,
         entity=destination_entity,
         version=version_id_for(destination_value),
-                )
+        )
