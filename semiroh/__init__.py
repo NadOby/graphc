@@ -19,8 +19,10 @@ from .references import (
 )
 from .state import State
 from .transforms import (
+    EntityChange,
     EntityMapping,
     TransformResult,
+    TransformationDefinition,
     rebind_reference,
     transfer_reference,
     transform,
@@ -36,6 +38,8 @@ __all__ = [
     "Value",
     "Reference",
     "State",
+    "EntityChange",
+    "TransformationDefinition",
     "EntityMapping",
     "TransformResult",
     "OwnershipError",
