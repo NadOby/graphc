@@ -7,7 +7,42 @@ It is normative where stated. Implementation details that are not part of the
 semantic contract must not be inferred from the Python reference
 implementation.
 
-## 1. State transitions
+## 1. Transformation definitions
+
+A transformation definition is an immutable semantic value describing a
+potential state transition.
+
+A definition is independent of a particular source `StateID`.
+
+Conceptually:
+
+    TransformationDefinition
+        =
+        semantic changes
+        +
+        explicit continuity mappings
+
+A definition may therefore be reused against multiple compatible source
+states.
+
+Application is a separate operation:
+
+    TransformationDefinition
+        +
+    SourceState
+        →
+    TransformationResult
+
+The definition describes what the transformation means.
+
+The result describes what happened when that definition was applied to one
+particular source state.
+
+The current definition does not yet include contracts, constraints, effects,
+capabilities, or provenance as semantic components. Those are separate
+models whose interaction with transformations remains to be specified.
+
+## 2. State transitions
 
 A transformation takes one immutable semantic state and produces another
 immutable semantic state.
@@ -19,10 +54,7 @@ Conceptually:
 The source state remains unchanged. The destination is a distinct immutable
 state.
 
-A transformation may additionally provide an explicit continuity relation
-between entities in the source and destination states.
-
-A transformation result therefore consists conceptually of:
+A transformation result consists conceptually of:
 
     source state
     destination state
@@ -32,32 +64,53 @@ A transformation result therefore consists conceptually of:
 Continuity mapping and provenance are properties of the transition. They are
 not properties of either state.
 
-## 2. Plain transformations
+## 3. Transformation changes
 
-A transformation without an explicit continuity mapping changes semantic state
-content without asserting which entities are continuous across the transition.
+A transformation definition may contain immutable entity changes.
 
-`transform(state, changes)` therefore establishes only:
+Each change identifies:
 
-    state content before
-    →
-    state content after
+    EntityID
+    semantic Value
 
-It does not establish identity continuity.
+The changed value must belong to the entity identified by the change.
 
-A caller must not infer continuity merely because the same `EntityID` appears
-in both states.
+Changes are canonically ordered by `EntityID`.
 
-## 3. Explicit transformation mappings
+A definition cannot contain multiple changes for the same entity.
 
-`transform_with_mapping()` may associate each selected source entity with zero,
-one, or multiple destination entities.
+Applying a change replaces the value associated with that entity in the
+destination state.
 
-Conceptually:
+A change does not by itself establish identity continuity.
+
+For example:
+
+    Entity E : value A
+        →
+    Entity E : value B
+
+changes the semantic value while retaining the entity in the destination.
+
+Whether `E` is considered continuous across the transition is determined by
+the explicit continuity mapping.
+
+## 4. Transformation mappings
+
+A transformation definition may contain explicit continuity mappings.
+
+A definition-level mapping is state-independent:
 
     source entity → destination entities
 
-The destination cardinality determines the continuity relationship:
+The concrete mapping produced by applying the definition is associated with
+the actual source `StateID`.
+
+Each source entity may occur at most once in the definition's mapping relation.
+
+Destination entities are canonically ordered.
+
+The mapping cardinality determines the continuity relationship:
 
     0 destinations   disappearance
     1 destination    unambiguous continuity
@@ -75,45 +128,23 @@ Therefore the relation supports:
 
 The mapping is a relation, not an assertion of semantic equality.
 
-## 4. Mapping domain
+## 5. Applying a transformation definition
 
-A mapping record identifies a source entity in the exact source state of the
-transformation.
+Applying a definition validates its mapping against the source and produced
+destination state.
 
-Every mapping source must therefore:
+Every mapping source must identify an entity present in the source state.
 
-1. identify the transformation's source `StateID`; and
-2. identify an entity actually present in that source state.
+Every non-empty mapping destination must identify an entity present in the
+destination state.
 
-A transformation may contain mappings for only some source entities.
+Destination entities may be introduced by the definition's changes.
 
-Absence of a mapping record is therefore distinct from an explicit mapping to
-zero destinations.
+A source mapped to an empty destination tuple disappears from the destination
+state.
 
-These have different meanings:
-
-    no mapping record
-        → no continuity relation has been asserted
-
-    source → ()
-        → continuity was explicitly asserted to end
-
-The precise semantics of an unmapped entity in the destination state are
-therefore determined by the transformation operation itself, not by the
-existence of another mapping record.
-
-## 5. Changes and destination state
-
-A transformation's changes determine destination state content.
-
-An existing entity may receive replacement content while retaining its
-`EntityID`.
-
-This does not by itself establish identity continuity. Continuity requires an
-explicit mapping when the transformation carries a mapping.
-
-An entity present in the destination without an incoming mapping represents a
-newly created destination entity.
+A destination entity with no incoming mapping is a newly created destination
+entity.
 
 Creation therefore has no synthetic source entity:
 
@@ -121,38 +152,24 @@ Creation therefore has no synthetic source entity:
 
 Creation is not identity transfer from an implicit predecessor.
 
-An entity explicitly mapped to zero destinations is absent from the destination
-state:
+A transformation result contains the concrete source-state mapping produced
+from the reusable definition.
 
-    source entity → ()
+## 6. Plain transformations
 
-This is disappearance.
+A transformation without an explicit continuity mapping changes semantic state
+content without asserting which entities are continuous across the transition.
 
-Disappearance is not the same operation as recursive destruction of an entity
-and its owned subtree. Transformation semantics operate on the explicitly
-specified destination state and ownership relation.
+`transform(state, changes)` therefore establishes only:
 
-## 6. Entity identity and value versions
+    state content before
+    →
+    state content after
 
-`EntityID` identifies an entity across states when the transformation explicitly
-asserts continuity.
+It does not establish identity continuity.
 
-`VersionID` identifies the particular semantic value represented by an entity
-within a state.
-
-Consequently:
-
-    same EntityID ≠ same VersionID
-
-and:
-
-    same EntityID ≠ implicit continuity
-
-A transformation may preserve an `EntityID` while producing a new value
-version.
-
-The distinction between entity identity and value version must remain
-explicit.
+A caller must not infer continuity merely because the same `EntityID` appears
+in both states.
 
 ## 7. References
 
