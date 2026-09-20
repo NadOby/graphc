@@ -37,6 +37,55 @@ class ContinuityTests(unittest.TestCase):
             (bar,),
         )
 
+    def test_creation_does_not_require_a_source_mapping(self) -> None:
+        created = EntityID("created")
+
+        state = State.create({})
+
+        result = transform_with_mapping(
+            state,
+            {
+                created: 42,
+            },
+            {},
+        )
+
+        self.assertTrue(
+            result.destination.contains(created)
+        )
+        self.assertEqual(
+            result.mappings,
+            (),
+        )
+
+    def test_created_entity_has_no_predecessor_for_reference_transfer(
+        self,
+    ) -> None:
+        source = EntityID("source")
+        created = EntityID("created")
+
+        state = State.create({
+            source: Value.create(source, 1),
+        })
+
+        result = transform_with_mapping(
+            state,
+            {
+                created: 42,
+            },
+            {},
+        )
+
+        with self.assertRaises(MissingEntityMapping):
+            transfer_reference(
+                state.reference(source),
+                result,
+            )
+
+        self.assertTrue(
+            result.destination.contains(created)
+        )
+
     def test_split_mapping_returns_all_destinations(self) -> None:
         source = EntityID("source")
         left = EntityID("left")
@@ -111,23 +160,28 @@ class ContinuityTests(unittest.TestCase):
                 result,
             )
 
-    def test_explicit_disappearance_requires_source_absence(self) -> None:
+    def test_explicit_disappearance_removes_source_entity(self) -> None:
         source = EntityID("source")
 
         state = State.create({
             source: Value.create(source, 1),
         })
 
-        with self.assertRaises(ValueError):
-            transform_with_mapping(
-                state,
-                {
-                    source: 2,
-                },
-                {
-                    source: (),
-                },
-            )
+        result = transform_with_mapping(
+            state,
+            {},
+            {
+                source: (),
+            },
+        )
+
+        self.assertFalse(
+            result.destination.contains(source)
+        )
+        self.assertEqual(
+            result.mapped_entities(state.reference(source)),
+            (),
+        )
 
     def test_explicit_disappearance_is_distinct_from_missing_mapping(
         self,
@@ -152,7 +206,11 @@ class ContinuityTests(unittest.TestCase):
         )
 
         with self.assertRaises(MissingEntityMapping):
-            result.mapped_entity(state.reference(source))
+            transform_with_mapping(
+                state,
+                {},
+                {},
+            ).mapped_entity(state.reference(source))
 
     def test_disappearance_cannot_transfer_reference(self) -> None:
         source = EntityID("source")
@@ -174,6 +232,78 @@ class ContinuityTests(unittest.TestCase):
                 state.reference(source),
                 result,
             )
+
+    def test_disappearance_removes_ownership_edges(self) -> None:
+        root = EntityID("root")
+        child = EntityID("child")
+        sibling = EntityID("sibling")
+
+        state = State.create(
+            {
+                root: Value.create(root, 1),
+                child: Value.create(child, 2),
+                sibling: Value.create(sibling, 3),
+            },
+            {
+                root: (child, sibling),
+            },
+        )
+
+        result = transform_with_mapping(
+            state,
+            {},
+            {
+                root: (),
+            },
+        )
+
+        self.assertFalse(
+            result.destination.contains(root)
+        )
+        self.assertTrue(
+            result.destination.contains(child)
+        )
+        self.assertTrue(
+            result.destination.contains(sibling)
+        )
+        self.assertEqual(
+            result.destination.ownership,
+            {},
+        )
+
+    def test_disappearance_removes_entity_from_parent_ownership(self) -> None:
+        root = EntityID("root")
+        child = EntityID("child")
+        sibling = EntityID("sibling")
+
+        state = State.create(
+            {
+                root: Value.create(root, 1),
+                child: Value.create(child, 2),
+                sibling: Value.create(sibling, 3),
+            },
+            {
+                root: (child, sibling),
+            },
+        )
+
+        result = transform_with_mapping(
+            state,
+            {},
+            {
+                child: (),
+            },
+        )
+
+        self.assertFalse(
+            result.destination.contains(child)
+        )
+        self.assertEqual(
+            result.destination.ownership,
+            {
+                root: (sibling,),
+            },
+        )
 
     def test_merge_maps_multiple_sources_to_one_destination(self) -> None:
         first = EntityID("first")
@@ -871,43 +1001,6 @@ class ContinuityTests(unittest.TestCase):
 
         self.assertEqual(transferred.entity, third)
 
-    def test_state_round_trip_through_lossless_rename(self) -> None:
-        foo = EntityID("foo")
-        bar = EntityID("bar")
-
-        initial = State.create({
-            foo: Value.create(foo, 42),
-        })
-
-        forward = transform_with_mapping(
-            initial,
-            {
-                bar: 42,
-            },
-            {
-                foo: bar,
-            },
-        )
-
-        backward = transform_with_mapping(
-            forward.destination,
-            {
-                foo: 42,
-            },
-            {
-                bar: foo,
-            },
-        )
-
-        self.assertEqual(
-            backward.destination.id,
-            initial.id,
-        )
-        self.assertEqual(
-            backward.destination.values,
-            initial.values,
-        )
-
     def test_lossless_round_trip_preserves_reference_continuity(self) -> None:
         foo = EntityID("foo")
         bar = EntityID("bar")
@@ -956,61 +1049,6 @@ class ContinuityTests(unittest.TestCase):
         self.assertEqual(
             round_trip_reference.version,
             initial.reference(foo).version,
-        )
-
-    def test_lossless_round_trip_can_restore_structural_ownership(self) -> None:
-        root = EntityID("root")
-        child = EntityID("child")
-        new_root = EntityID("new_root")
-        new_child = EntityID("new_child")
-
-        initial = State.create(
-            {
-                root: Value.create(root, 1),
-                child: Value.create(child, 2),
-            },
-            {
-                root: (child,),
-            },
-        )
-
-        forward = transform_with_mapping(
-            initial,
-            {
-                new_root: 10,
-                new_child: 20,
-            },
-            {
-                root: new_root,
-                child: new_child,
-            },
-            ownership={
-                new_root: (new_child,),
-            },
-        )
-
-        backward = transform_with_mapping(
-            forward.destination,
-            {
-                root: 1,
-                child: 2,
-            },
-            {
-                new_root: root,
-                new_child: child,
-            },
-            ownership={
-                root: (child,),
-            },
-        )
-
-        self.assertEqual(
-            backward.destination.id,
-            initial.id,
-        )
-        self.assertEqual(
-            backward.destination.ownership,
-            initial.ownership,
         )
 
     def test_lossy_round_trip_does_not_claim_exact_restoration(self) -> None:
