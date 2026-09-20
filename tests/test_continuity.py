@@ -1014,7 +1014,7 @@ class ContinuityTests(unittest.TestCase):
                 disappeared,
             )
 
-        with self.assertRaises(MissingEntityMapping):
+        with self.assertRaises(CrossStateReference):
             transfer_reference(
                 initial.reference(source),
                 next_result,
@@ -1148,7 +1148,7 @@ class ContinuityTests(unittest.TestCase):
             },
         )
 
-        with self.assertRaises(MissingEntityMapping):
+        with self.assertRaises(CrossStateReference):
             transfer_reference(
                 initial.reference(first),
                 second_result,
@@ -1345,4 +1345,4 @@ class ContinuityTests(unittest.TestCase):
                         destination_entities=(missing,),
                     ),
                 ),
-        )
+    )
