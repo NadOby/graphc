@@ -186,7 +186,73 @@ class TransformationDefinitionTests(unittest.TestCase):
                 ),
             )
 
-    def test_apply_replaces_existing_value(self) -> None:
+    def test_unmentioned_entity_is_preserved_unchanged(self) -> None:
+        unchanged = EntityID("unchanged")
+        changed = EntityID("changed")
+
+        state = State.create({
+            unchanged: Value.create(unchanged, 1),
+            changed: Value.create(changed, 2),
+        })
+
+        definition = TransformationDefinition.create(
+            changes={
+                changed: 20,
+            },
+            mappings={
+                changed: changed,
+            },
+        )
+
+        result = definition.apply(state)
+
+        self.assertTrue(
+            result.destination.contains(unchanged),
+        )
+        self.assertEqual(
+            result.destination.values[unchanged].content,
+            1,
+        )
+        self.assertEqual(
+            result.destination.values[changed].content,
+            20,
+        )
+
+    def test_unmentioned_entity_has_no_implicit_continuity_mapping(self) -> None:
+        unchanged = EntityID("unchanged")
+        changed = EntityID("changed")
+
+        state = State.create({
+            unchanged: Value.create(unchanged, 1),
+            changed: Value.create(changed, 2),
+        })
+
+        definition = TransformationDefinition.create(
+            changes={
+                changed: 20,
+            },
+            mappings={
+                changed: changed,
+            },
+        )
+
+        result = definition.apply(state)
+
+        self.assertEqual(
+            result.mappings,
+            (
+                result.mappings[0],
+            ),
+        )
+        self.assertEqual(
+            result.mappings[0].source_entity,
+            changed,
+        )
+
+        with self.assertRaises(MissingEntityMapping):
+            result.mapped_entity(state.reference(unchanged))
+
+    def test_existing_entity_can_change_without_mapping(self) -> None:
         foo = EntityID("foo")
 
         state = State.create({
@@ -194,8 +260,116 @@ class TransformationDefinitionTests(unittest.TestCase):
         })
 
         definition = TransformationDefinition.create(
-            changes={foo: 2},
-            mappings={foo: foo},
+            changes={
+                foo: 2,
+            },
+        )
+
+        result = definition.apply(state)
+
+        self.assertTrue(
+            result.destination.contains(foo),
+        )
+        self.assertEqual(
+            result.destination.values[foo].content,
+            2,
+        )
+        self.assertEqual(
+            result.mappings,
+            (),
+        )
+
+    def test_new_entity_is_created_without_mapping(self) -> None:
+        created = EntityID("created")
+
+        state = State.create({})
+
+        definition = TransformationDefinition.create(
+            changes={
+                created: 42,
+            },
+        )
+
+        result = definition.apply(state)
+
+        self.assertTrue(
+            result.destination.contains(created),
+        )
+        self.assertEqual(
+            result.destination.values[created].content,
+            42,
+        )
+        self.assertEqual(
+            result.mappings,
+            (),
+        )
+
+    def test_mapping_source_must_exist_even_when_value_is_changed(self) -> None:
+        source = EntityID("source")
+        destination = EntityID("destination")
+        missing = EntityID("missing")
+
+        state = State.create({
+            source: Value.create(source, 1),
+        })
+
+        definition = TransformationDefinition.create(
+            changes={
+                destination: 2,
+            },
+            mappings={
+                missing: destination,
+            },
+        )
+
+        with self.assertRaises(KeyError):
+            definition.apply(state)
+
+    def test_mapping_destination_can_be_created_by_a_change(self) -> None:
+        source = EntityID("source")
+        destination = EntityID("destination")
+
+        state = State.create({
+            source: Value.create(source, 1),
+        })
+
+        definition = TransformationDefinition.create(
+            changes={
+                destination: 2,
+            },
+            mappings={
+                source: destination,
+            },
+        )
+
+        result = definition.apply(state)
+
+        self.assertTrue(
+            result.destination.contains(destination),
+        )
+        self.assertEqual(
+            result.destination.values[destination].content,
+            2,
+        )
+        self.assertEqual(
+            result.mapped_entities(state.reference(source)),
+            (destination,),
+        )
+
+    def test_apply_replaces_existing_value_with_explicit_continuity(self) -> None:
+        foo = EntityID("foo")
+
+        state = State.create({
+            foo: Value.create(foo, 1),
+        })
+
+        definition = TransformationDefinition.create(
+            changes={
+                foo: 2,
+            },
+            mappings={
+                foo: foo,
+            },
         )
 
         result = definition.apply(state)
@@ -214,28 +388,79 @@ class TransformationDefinitionTests(unittest.TestCase):
             (foo,),
         )
 
-    def test_apply_can_create_an_entity(self) -> None:
-        foo = EntityID("foo")
+    def test_mapping_source_change_does_not_create_implicit_mapping_for_others(
+        self,
+    ) -> None:
+        source = EntityID("source")
+        unchanged = EntityID("unchanged")
+        destination = EntityID("destination")
 
-        state = State.create({})
+        state = State.create({
+            source: Value.create(source, 1),
+            unchanged: Value.create(unchanged, 2),
+        })
 
         definition = TransformationDefinition.create(
-            changes={foo: 42},
+            changes={
+                source: 10,
+                destination: 20,
+            },
+            mappings={
+                source: destination,
+            },
         )
 
         result = definition.apply(state)
 
-        self.assertTrue(
+        self.assertEqual(
+            result.destination.values[source].content,
+            10,
+        )
+        self.assertEqual(
+            result.destination.values[destination].content,
+            20,
+        )
+        self.assertEqual(
+            result.destination.values[unchanged].content,
+            2,
+        )
+        self.assertEqual(
+            len(result.mappings),
+            1,
+        )
+        self.assertEqual(
+            result.mappings[0].source_entity,
+            source,
+        )
+
+    def test_disappearance_takes_precedence_over_value_change(self) -> None:
+        foo = EntityID("foo")
+
+        state = State.create({
+            foo: Value.create(foo, 1),
+        })
+
+        definition = TransformationDefinition.create(
+            changes={
+                foo: 99,
+            },
+            mappings={
+                foo: (),
+            },
+        )
+
+        result = definition.apply(state)
+
+        self.assertFalse(
             result.destination.contains(foo),
         )
         self.assertEqual(
-            result.destination.values[foo].content,
-            42,
-        )
-        self.assertEqual(
-            result.mappings,
+            result.mappings[0].destination_entities,
             (),
         )
+
+        with self.assertRaises(MissingEntityMapping):
+            result.mapped_entity(state.reference(foo))
 
     def test_apply_can_disappear_an_entity(self) -> None:
         foo = EntityID("foo")
@@ -245,7 +470,9 @@ class TransformationDefinitionTests(unittest.TestCase):
         })
 
         definition = TransformationDefinition.create(
-            mappings={foo: ()},
+            mappings={
+                foo: (),
+            },
         )
 
         result = definition.apply(state)
@@ -296,8 +523,12 @@ class TransformationDefinitionTests(unittest.TestCase):
         })
 
         definition = TransformationDefinition.create(
-            changes={foo: 2},
-            mappings={foo: foo},
+            changes={
+                foo: 2,
+            },
+            mappings={
+                foo: foo,
+            },
         )
 
         result = definition.apply(state)
@@ -311,7 +542,7 @@ class TransformationDefinitionTests(unittest.TestCase):
             2,
         )
 
-    def test_empty_definition_produces_equivalent_state(self) -> None:
+    def test_empty_definition_preserves_state_content(self) -> None:
         foo = EntityID("foo")
 
         state = State.create({
@@ -338,3 +569,7 @@ class TransformationDefinitionTests(unittest.TestCase):
             result.mappings,
             (),
         )
+
+
+if __name__ == "__main__":
+    unittest.main()
