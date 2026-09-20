@@ -3,6 +3,7 @@
 import unittest
 
 from semiroh import (
+    AmbiguousEntityMapping,
     EntityID,
     EntityMapping,
     MissingEntityMapping,
@@ -103,7 +104,7 @@ class TransformMappingTests(unittest.TestCase):
             },
         )
 
-        with self.assertRaises(Exception):
+        with self.assertRaises(AmbiguousEntityMapping):
             result.mapped_entity(state.reference(source))
 
     def test_explicit_disappearance_removes_source_entity(self) -> None:
@@ -598,4 +599,4 @@ class TransformMappingTests(unittest.TestCase):
                         destination_entities=(missing,),
                     ),
                 ),
-            )
+    )
