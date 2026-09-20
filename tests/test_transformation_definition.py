@@ -46,10 +46,7 @@ class TransformationDefinitionTests(unittest.TestCase):
         self.assertEqual(first, second)
 
         self.assertEqual(
-            tuple(
-                change.entity
-                for change in first.changes
-            ),
+            tuple(change.entity for change in first.changes),
             tuple(sorted((foo, bar))),
         )
 
@@ -347,6 +344,9 @@ class TransformationDefinitionTests(unittest.TestCase):
         self.assertTrue(
             result.destination.contains(destination),
         )
+        self.assertFalse(
+            result.destination.contains(source),
+        )
         self.assertEqual(
             result.destination.values[destination].content,
             2,
@@ -378,6 +378,9 @@ class TransformationDefinitionTests(unittest.TestCase):
             result.destination.values[foo].content,
             2,
         )
+        self.assertTrue(
+            result.destination.contains(foo),
+        )
         self.assertNotEqual(
             result.destination.id,
             state.id,
@@ -388,7 +391,7 @@ class TransformationDefinitionTests(unittest.TestCase):
             (foo,),
         )
 
-    def test_mapping_source_change_does_not_create_implicit_mapping_for_others(
+    def test_mapping_source_change_removes_source_without_implicit_mapping_for_others(
         self,
     ) -> None:
         source = EntityID("source")
@@ -412,9 +415,8 @@ class TransformationDefinitionTests(unittest.TestCase):
 
         result = definition.apply(state)
 
-        self.assertEqual(
-            result.destination.values[source].content,
-            10,
+        self.assertFalse(
+            result.destination.contains(source),
         )
         self.assertEqual(
             result.destination.values[destination].content,
