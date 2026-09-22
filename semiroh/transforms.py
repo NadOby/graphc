@@ -619,5 +619,5 @@ def rebind_reference(
     return Reference(
         state=destination.id,
         entity=destination_entity,
-        version=version_id_for(destination_value),
+        ⁶),
         )
