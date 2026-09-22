@@ -119,3 +119,18 @@ Covered scenarios:
 
 The file acts as an executable specification anchor for future
 composition implementation.
+
+### 2026-09-20 – Composition API specification
+
+Added `docs/transformation_composition_api.md`.
+
+Introduced explicit composition result categories:
+
+- Known continuity
+- Known disappearance
+- Unknown
+
+Unknown represents insufficient continuity information and is distinct
+from both continuity and disappearance.
+
+Composition APIs are specified in terms of these three result classes.
