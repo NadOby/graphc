@@ -2,7 +2,7 @@
 
 import unittest
 
-from semiroh.constraints import Constraint, ConstraintResult
+from semiroh import Constraint, ConstraintResult
 
 
 class ConstraintTests(unittest.TestCase):
@@ -70,3 +70,13 @@ class ConstraintTests(unittest.TestCase):
 
         with self.assertRaises(AttributeError):
             constraint.description = "changed"  # type: ignore[misc]
+
+    def test_constraint_api_is_exported(self) -> None:
+        constraint = Constraint(
+            predicate=lambda _: ConstraintResult.SATISFIED,
+        )
+
+        self.assertIsInstance(
+            constraint.evaluate(object()),
+            ConstraintResult,
+        )
