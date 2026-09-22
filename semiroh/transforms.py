@@ -34,12 +34,7 @@ class EntityChange:
 
 @dataclass(frozen=True)
 class TransformationMapping:
-    """Immutable continuity mapping used by a transformation definition.
-
-    Unlike EntityMapping, this mapping is independent of any particular
-    source state and can therefore belong to a reusable transformation
-    definition.
-    """
+    """Immutable continuity mapping used by a transformation definition."""
 
     source_entity: EntityID
     destination_entities: tuple[EntityID, ...]
@@ -68,10 +63,6 @@ class TransformationDefinition:
 
     The definition is independent of a particular source state. It describes
     semantic value changes and explicit entity continuity.
-
-    Constraints, effects, capabilities, ownership transitions, and provenance
-    remain separate parts of the transformation model until they are explicitly
-    specified.
     """
 
     changes: tuple[EntityChange, ...]
@@ -139,16 +130,21 @@ class TransformationDefinition:
                 (
                     TransformationMapping(
                         source_entity=source_entity,
-                        destination_entities=tuple(
-                            sorted(
-                                (
-                                    destination_spec,
+                        destination_entities=(
+                            tuple(
+                                sorted(
+                                    (
+                                        destination_spec,
+                                    )
                                 )
                             )
-                        )
-                        if isinstance(destination_spec, EntityID)
-                        else tuple(
-                            sorted(destination_spec)
+                            if isinstance(
+                                destination_spec,
+                                EntityID,
+                            )
+                            else tuple(
+                                sorted(destination_spec)
+                            )
                         ),
                     )
                     for source_entity, destination_spec in (
@@ -239,14 +235,9 @@ class TransformationDefinition:
                 )
             )
 
-        # An explicit mapping determines the source entity's destination
-        # representation. Unmapped source entities remain preserved.
         for entity in explicitly_mapped:
             values.pop(entity, None)
 
-        # Reintroduce explicitly mapped entities only when their destination
-        # set explicitly contains the same EntityID. This makes A -> A
-        # explicit continuity while A -> B removes A from the destination.
         for mapping in self.mappings:
             if mapping.source_entity in mapping.destination_entities:
                 source_entity = mapping.source_entity
@@ -267,12 +258,6 @@ class TransformationDefinition:
                         values[source_entity] = change.value
                     else:
                         values[source_entity] = source_value
-
-        disappeared = {
-            mapping.source_entity
-            for mapping in self.mappings
-            if not mapping.destination_entities
-        }
 
         if ownership is None:
             destination_ownership = {
@@ -304,10 +289,71 @@ class TransformationDefinition:
         return TransformResult(
             source=state,
             destination=destination,
-            mappings=tuple(
-                normalized_mappings
-            ),
+            mappings=tuple(normalized_mappings),
             provenance=provenance,
+        )
+
+
+@dataclass(frozen=True)
+class CompositionResult:
+    """Immutable result of composing two transformation definitions.
+
+    ``mappings`` contains continuity that can be established explicitly
+    through both transformations.
+
+    ``unknown_sources`` contains sources for which the first transformation
+    establishes continuity, but the second transformation does not establish
+    what happens to the corresponding intermediate entity.
+
+    Unknown is distinct from disappearance.
+    """
+
+    mappings: tuple[TransformationMapping, ...]
+    unknown_sources: frozenset[EntityID]
+
+    def __post_init__(self) -> None:
+        mapping_entities = tuple(
+            mapping.source_entity
+            for mapping in self.mappings
+        )
+
+        if len(mapping_entities) != len(set(mapping_entities)):
+            raise ValueError(
+                "multiple composed mappings for the same source entity"
+            )
+
+        if mapping_entities != tuple(sorted(mapping_entities)):
+            raise ValueError(
+                "composed mappings are not canonically ordered"
+            )
+
+        if any(
+            mapping.source_entity in self.unknown_sources
+            for mapping in self.mappings
+        ):
+            raise ValueError(
+                "a source cannot be both mapped and unknown"
+            )
+
+    def mapping_for(
+        self,
+        source_entity: EntityID,
+    ) -> TransformationMapping | None:
+        """Return the composed mapping for a source, if one exists."""
+
+        for mapping in self.mappings:
+            if mapping.source_entity == source_entity:
+                return mapping
+
+        return None
+
+    @property
+    def known_sources(self) -> frozenset[EntityID]:
+        """Return sources for which composition established a result."""
+
+        return frozenset(
+            mapping.source_entity
+            for mapping in self.mappings
         )
 
 
@@ -322,10 +368,7 @@ class EntityMapping:
 
 @dataclass(frozen=True)
 class TransformResult:
-    """Immutable result of a state transformation.
-
-    Mapping and provenance belong to the transition, not either state.
-    """
+    """Immutable result of a state transformation."""
 
     source: State
     destination: State
@@ -333,8 +376,6 @@ class TransformResult:
     provenance: Any = None
 
     def __post_init__(self) -> None:
-        """Validate structural invariants of the transition mapping."""
-
         seen_sources: set[EntityID] = set()
 
         for mapping in self.mappings:
@@ -426,11 +467,7 @@ class TransformResult:
         self,
         reference: Reference,
     ) -> EntityID:
-        """Return the unique destination entity.
-
-        Raises MissingEntityMapping when the source entity disappears and
-        AmbiguousEntityMapping when it maps to multiple destinations.
-        """
+        """Return the unique destination entity."""
 
         destinations = self.mapped_entities(reference)
 
@@ -447,6 +484,85 @@ class TransformResult:
             )
 
         return destinations[0]
+
+
+def compose(
+    first: TransformationDefinition,
+    second: TransformationDefinition,
+) -> CompositionResult:
+    """Compose explicit continuity mappings from two transformations.
+
+    Only explicit mappings compose. If a destination of the first mapping
+    has no explicit mapping in the second transformation, continuity becomes
+    unknown rather than being inferred from preservation.
+
+    Destination entities are treated as sets, so duplicate endpoints collapse.
+    """
+
+    second_mappings = {
+        mapping.source_entity: mapping.destination_entities
+        for mapping in second.mappings
+    }
+
+    composed: list[TransformationMapping] = []
+    unknown_sources: set[EntityID] = set()
+
+    for first_mapping in first.mappings:
+        source_entity = first_mapping.source_entity
+        intermediate_entities = first_mapping.destination_entities
+
+        if not intermediate_entities:
+            composed.append(
+                TransformationMapping(
+                    source_entity=source_entity,
+                    destination_entities=(),
+                )
+            )
+            continue
+
+        final_entities: set[EntityID] = set()
+        unknown = False
+
+        for intermediate_entity in intermediate_entities:
+            second_destinations = second_mappings.get(
+                intermediate_entity
+            )
+
+            if second_destinations is None:
+                unknown = True
+                continue
+
+            final_entities.update(second_destinations)
+
+        if unknown:
+            unknown_sources.add(source_entity)
+
+        if final_entities and not unknown:
+            composed.append(
+                TransformationMapping(
+                    source_entity=source_entity,
+                    destination_entities=tuple(
+                        sorted(final_entities)
+                    ),
+                )
+            )
+        elif not final_entities and not unknown:
+            composed.append(
+                TransformationMapping(
+                    source_entity=source_entity,
+                    destination_entities=(),
+                )
+            )
+
+    return CompositionResult(
+        mappings=tuple(
+            sorted(
+                composed,
+                key=lambda mapping: mapping.source_entity,
+            )
+        ),
+        unknown_sources=frozenset(unknown_sources),
+    )
 
 
 def transform(
@@ -489,12 +605,7 @@ def transfer_reference(
     reference: Reference,
     result: TransformResult,
 ) -> Reference:
-    """Transfer a valid source reference through a uniquely resolving mapping.
-
-    The reference must identify the exact value present in the transition's
-    source state. Mapping by EntityID alone is insufficient because references
-    are also pinned to a specific VersionID.
-    """
+    """Transfer a valid source reference through a uniquely resolving mapping."""
 
     if reference.state != result.source.id:
         raise CrossStateReference(
@@ -528,9 +639,7 @@ def transfer_reference(
             f"{destination.id.value}"
         )
 
-    destination_value = destination.values[
-        destination_entity
-    ]
+    destination_value = destination.values[destination_entity]
 
     return Reference(
         state=destination.id,
@@ -555,12 +664,10 @@ def rebind_reference(
             f"{destination.id.value}"
         )
 
-    destination_value = destination.values[
-        destination_entity
-    ]
+    destination_value = destination.values[destination_entity]
 
     return Reference(
         state=destination.id,
         entity=destination_entity,
         version=version_id_for(destination_value),
-    )
+        )
