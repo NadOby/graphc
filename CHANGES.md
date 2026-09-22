@@ -99,3 +99,23 @@ stable to form part of the SEMIROH semantic model.
   the current transformation model.
 - Marked unresolved transformation semantics explicitly rather than
   prematurely defining them through implementation or tests.
+
+### 2026-09-20 – Transformation composition specification tests
+
+Added `tests/test_transformation_composition.py`.
+
+These tests intentionally document expected composition behavior
+without introducing composition implementation.
+
+Covered scenarios:
+
+- continuity chain
+- disappearance
+- split
+- split-merge normalization
+- preservation vs continuity
+- identity transformation
+- associativity
+
+The file acts as an executable specification anchor for future
+composition implementation.
