@@ -457,7 +457,12 @@ def compose(
         mapping.source_entity: mapping.destination_entities
         for mapping in second.mappings
     }
-    second_unknown_sources = second.unknown_sources
+
+    second_unknown_sources = (
+        second.unknown_sources
+        if isinstance(second, CompositionResult)
+        else frozenset()
+    )
 
     composed: list[TransformationMapping] = []
     unknown_sources: set[EntityID] = set()
@@ -622,4 +627,4 @@ def rebind_reference(
         state=destination.id,
         entity=destination_entity,
         version=version_id_for(destination_value),
-)
+    )
