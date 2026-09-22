@@ -21,6 +21,10 @@ class IdentityTests(unittest.TestCase):
 
         self.assertEqual(first.entity, second.entity)
         self.assertNotEqual(
+            first.version_id,
+            second.version_id,
+        )
+        self.assertNotEqual(
             version_id_for(first),
             version_id_for(second),
         )
@@ -34,8 +38,12 @@ class IdentityTests(unittest.TestCase):
         second = Value.create(foo, 42)
 
         self.assertEqual(
+            first.version_id,
+            second.version_id,
+        )
+        self.assertEqual(
+            first.version_id,
             version_id_for(first),
-            version_id_for(second),
         )
         self.assertTrue(semantic_equal(first, second))
         self.assertTrue(same_entity(first, second))
@@ -47,12 +55,12 @@ class IdentityTests(unittest.TestCase):
         intermediate = Value.create(foo, 1)
 
         self.assertEqual(
-            version_id_for(direct),
-            version_id_for(Value.create(foo, 42)),
+            direct.version_id,
+            Value.create(foo, 42).version_id,
         )
         self.assertNotEqual(
-            version_id_for(direct),
-            version_id_for(intermediate),
+            direct.version_id,
+            intermediate.version_id,
         )
 
     def test_same_entity_different_versions_are_not_equal(self) -> None:
@@ -75,6 +83,6 @@ class IdentityTests(unittest.TestCase):
         self.assertFalse(same_entity(first, second))
         self.assertTrue(semantic_equal(first, second))
         self.assertNotEqual(
-            version_id_for(first),
-            version_id_for(second),
+            first.version_id,
+            second.version_id,
         )
