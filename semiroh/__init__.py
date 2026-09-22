@@ -19,11 +19,13 @@ from .references import (
 )
 from .state import State
 from .transforms import (
+    CompositionResult,
     EntityChange,
     EntityMapping,
     TransformResult,
     TransformationDefinition,
     TransformationMapping,
+    compose,
     rebind_reference,
     transfer_reference,
     transform,
@@ -44,6 +46,7 @@ __all__ = [
     "TransformationDefinition",
     "EntityMapping",
     "TransformResult",
+    "CompositionResult",
     "OwnershipError",
     "CrossStateReference",
     "StaleReference",
@@ -61,6 +64,7 @@ __all__ = [
     "owned_subtree",
     "transform",
     "transform_with_mapping",
+    "compose",
     "transfer_reference",
     "rebind_reference",
 ]
