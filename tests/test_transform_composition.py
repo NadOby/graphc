@@ -1,355 +1,266 @@
-"""Tests for explicit composition of multiple transformations."""
+"""Tests for transformation composition semantics."""
 
 import unittest
 
 from semiroh import (
-    AmbiguousEntityMapping,
+    CompositionResult,
     EntityID,
-    State,
-    Value,
-    transfer_reference,
-    transform_with_mapping,
+    TransformationDefinition,
+    compose,
 )
 
 
-class TransformCompositionTests(unittest.TestCase):
-    def test_sequential_one_to_one_mapping(self) -> None:
-        first = EntityID("first")
-        second = EntityID("second")
-        third = EntityID("third")
+class TransformationCompositionTests(unittest.TestCase):
+    def test_chain_composes_explicit_continuity(self) -> None:
+        a = EntityID("A")
+        b = EntityID("B")
+        c = EntityID("C")
 
-        initial = State.create({
-            first: Value.create(first, 1),
-        })
-
-        first_result = transform_with_mapping(
-            initial,
-            {
-                second: 2,
-            },
-            {
-                first: second,
-            },
+        first = TransformationDefinition.create(
+            mappings={a: b},
+        )
+        second = TransformationDefinition.create(
+            mappings={b: c},
         )
 
-        second_result = transform_with_mapping(
-            first_result.destination,
-            {
-                third: 3,
-            },
-            {
-                second: third,
-            },
-        )
-
-        reference = transfer_reference(
-            initial.reference(first),
-            first_result,
-        )
-        reference = transfer_reference(
-            reference,
-            second_result,
-        )
-
-        self.assertEqual(reference.entity, third)
-        self.assertEqual(
-            reference.state,
-            second_result.destination.id,
-        )
-
-    def test_sequential_split_then_merge(self) -> None:
-        source = EntityID("source")
-        left = EntityID("left")
-        right = EntityID("right")
-        merged = EntityID("merged")
-
-        initial = State.create({
-            source: Value.create(source, 1),
-        })
-
-        split = transform_with_mapping(
-            initial,
-            {
-                left: 10,
-                right: 20,
-            },
-            {
-                source: (left, right),
-            },
-        )
-
-        merge = transform_with_mapping(
-            split.destination,
-            {
-                merged: 30,
-            },
-            {
-                left: merged,
-                right: merged,
-            },
-        )
-
-        with self.assertRaises(AmbiguousEntityMapping):
-            transfer_reference(
-                initial.reference(source),
-                split,
-            )
-
-        left_reference = transfer_reference(
-            split.destination.reference(left),
-            merge,
-        )
-        right_reference = transfer_reference(
-            split.destination.reference(right),
-            merge,
-        )
-
-        self.assertEqual(left_reference.entity, merged)
-        self.assertEqual(right_reference.entity, merged)
-
-    def test_sequential_merge_then_one_to_one(self) -> None:
-        first = EntityID("first")
-        second = EntityID("second")
-        merged = EntityID("merged")
-        final = EntityID("final")
-
-        initial = State.create({
-            first: Value.create(first, 1),
-            second: Value.create(second, 2),
-        })
-
-        merge = transform_with_mapping(
-            initial,
-            {
-                merged: 3,
-            },
-            {
-                first: merged,
-                second: merged,
-            },
-        )
-
-        next_result = transform_with_mapping(
-            merge.destination,
-            {
-                final: 4,
-            },
-            {
-                merged: final,
-            },
-        )
-
-        first_reference = transfer_reference(
-            initial.reference(first),
-            merge,
-        )
-        first_reference = transfer_reference(
-            first_reference,
-            next_result,
-        )
-
-        second_reference = transfer_reference(
-            initial.reference(second),
-            merge,
-        )
-        second_reference = transfer_reference(
-            second_reference,
-            next_result,
-        )
-
-        self.assertEqual(first_reference.entity, final)
-        self.assertEqual(second_reference.entity, final)
-
-    def test_intermediate_state_ids_remain_distinct(self) -> None:
-        first = EntityID("first")
-        second = EntityID("second")
-        third = EntityID("third")
-
-        initial = State.create({
-            first: Value.create(first, 1),
-        })
-
-        first_result = transform_with_mapping(
-            initial,
-            {
-                second: 2,
-            },
-            {
-                first: second,
-            },
-        )
-
-        second_result = transform_with_mapping(
-            first_result.destination,
-            {
-                third: 3,
-            },
-            {
-                second: third,
-            },
-        )
-
-        self.assertNotEqual(
-            initial.id,
-            first_result.destination.id,
-        )
-        self.assertNotEqual(
-            first_result.destination.id,
-            second_result.destination.id,
-        )
-        self.assertNotEqual(
-            initial.id,
-            second_result.destination.id,
-        )
-
-    def test_second_transform_ownership_change_is_independent(self) -> None:
-        root = EntityID("root")
-        child = EntityID("child")
-        new_root = EntityID("new_root")
-        new_child = EntityID("new_child")
-        final_root = EntityID("final_root")
-        final_child = EntityID("final_child")
-
-        initial = State.create(
-            {
-                root: Value.create(root, 0),
-                child: Value.create(child, 1),
-            },
-            {
-                root: (child,),
-            },
-        )
-
-        first_result = transform_with_mapping(
-            initial,
-            {
-                new_root: 10,
-                new_child: 11,
-            },
-            {
-                root: new_root,
-                child: new_child,
-            },
-            ownership={
-                new_root: (new_child,),
-            },
-        )
-
-        second_result = transform_with_mapping(
-            first_result.destination,
-            {
-                final_root: 20,
-                final_child: 21,
-            },
-            {
-                new_root: final_root,
-                new_child: final_child,
-            },
-            ownership={},
-        )
+        result = compose(first, second)
 
         self.assertEqual(
-            first_result.destination.ownership,
-            {
-                new_root: (new_child,),
-            },
+            result.mappings,
+            (
+                first.mappings[0].__class__(
+                    source_entity=a,
+                    destination_entities=(c,),
+                ),
+            ),
         )
         self.assertEqual(
-            second_result.destination.ownership,
-            {},
+            result.unknown_sources,
+            frozenset(),
         )
 
-    def test_lossless_round_trip_preserves_reference_continuity(self) -> None:
-        foo = EntityID("foo")
-        bar = EntityID("bar")
+    def test_disappearance_composes(self) -> None:
+        a = EntityID("A")
+        b = EntityID("B")
 
-        initial = State.create({
-            foo: Value.create(foo, 42),
-        })
+        first = TransformationDefinition.create(
+            mappings={a: b},
+        )
+        second = TransformationDefinition.create(
+            mappings={b: ()},
+        )
 
-        forward = transform_with_mapping(
-            initial,
-            {
-                bar: 42,
-            },
-            {
-                foo: bar,
+        result = compose(first, second)
+
+        self.assertEqual(
+            result.mappings[0].destination_entities,
+            (),
+        )
+        self.assertEqual(
+            result.unknown_sources,
+            frozenset(),
+        )
+
+    def test_split_composes(self) -> None:
+        a = EntityID("A")
+        b = EntityID("B")
+        c = EntityID("C")
+        d = EntityID("D")
+        e = EntityID("E")
+
+        first = TransformationDefinition.create(
+            mappings={a: (b, c)},
+        )
+        second = TransformationDefinition.create(
+            mappings={
+                b: d,
+                c: e,
             },
         )
 
-        backward = transform_with_mapping(
-            forward.destination,
-            {
-                foo: 42,
-            },
-            {
-                bar: foo,
+        result = compose(first, second)
+
+        self.assertEqual(
+            result.mappings[0].destination_entities,
+            (d, e),
+        )
+        self.assertEqual(
+            result.unknown_sources,
+            frozenset(),
+        )
+
+    def test_split_merge_uses_set_semantics(self) -> None:
+        a = EntityID("A")
+        b = EntityID("B")
+        c = EntityID("C")
+        d = EntityID("D")
+
+        first = TransformationDefinition.create(
+            mappings={a: (b, c)},
+        )
+        second = TransformationDefinition.create(
+            mappings={
+                b: d,
+                c: d,
             },
         )
 
-        forward_reference = transfer_reference(
-            initial.reference(foo),
-            forward,
+        result = compose(first, second)
+
+        self.assertEqual(
+            result.mappings[0].destination_entities,
+            (d,),
         )
-        round_trip_reference = transfer_reference(
-            forward_reference,
-            backward,
+        self.assertEqual(
+            result.unknown_sources,
+            frozenset(),
+        )
+
+    def test_missing_second_mapping_produces_unknown(self) -> None:
+        a = EntityID("A")
+        b = EntityID("B")
+
+        first = TransformationDefinition.create(
+            mappings={a: b},
+        )
+        second = TransformationDefinition.create()
+
+        result = compose(first, second)
+
+        self.assertEqual(
+            result.mappings,
+            (),
+        )
+        self.assertEqual(
+            result.unknown_sources,
+            frozenset({a}),
+        )
+
+    def test_partial_split_resolution_produces_unknown(self) -> None:
+        a = EntityID("A")
+        b = EntityID("B")
+        c = EntityID("C")
+        d = EntityID("D")
+
+        first = TransformationDefinition.create(
+            mappings={a: (b, c)},
+        )
+        second = TransformationDefinition.create(
+            mappings={b: d},
+        )
+
+        result = compose(first, second)
+
+        self.assertEqual(
+            result.mappings,
+            (),
+        )
+        self.assertEqual(
+            result.unknown_sources,
+            frozenset({a}),
+        )
+
+    def test_identity_is_neutral_for_known_continuity(self) -> None:
+        a = EntityID("A")
+        b = EntityID("B")
+
+        transformation = TransformationDefinition.create(
+            mappings={a: b},
+        )
+        identity = TransformationDefinition.create(
+            mappings={b: b},
+        )
+
+        result = compose(transformation, identity)
+
+        self.assertEqual(
+            result.mappings[0].destination_entities,
+            (b,),
+        )
+        self.assertEqual(
+            result.unknown_sources,
+            frozenset(),
+        )
+
+    def test_disappearance_is_not_unknown(self) -> None:
+        a = EntityID("A")
+        b = EntityID("B")
+
+        first = TransformationDefinition.create(
+            mappings={a: b},
+        )
+        second = TransformationDefinition.create(
+            mappings={b: ()},
+        )
+
+        result = compose(first, second)
+
+        self.assertNotIn(a, result.unknown_sources)
+        self.assertEqual(
+            result.mappings[0].destination_entities,
+            (),
+        )
+
+    def test_composition_result_is_immutable(self) -> None:
+        result = CompositionResult(
+            mappings=(),
+            unknown_sources=frozenset(),
+        )
+
+        with self.assertRaises(AttributeError):
+            result.unknown_sources = frozenset()
+
+    def test_mapping_lookup(self) -> None:
+        a = EntityID("A")
+        b = EntityID("B")
+        c = EntityID("C")
+
+        result = compose(
+            TransformationDefinition.create(
+                mappings={a: b},
+            ),
+            TransformationDefinition.create(
+                mappings={b: c},
+            ),
+        )
+
+        mapping = result.mapping_for(a)
+
+        self.assertIsNotNone(mapping)
+        assert mapping is not None
+        self.assertEqual(
+            mapping.destination_entities,
+            (c,),
+        )
+
+        self.assertIsNone(
+            result.mapping_for(b),
+        )
+
+    def test_known_sources_excludes_unknown_sources(self) -> None:
+        a = EntityID("A")
+        b = EntityID("B")
+        c = EntityID("C")
+
+        result = compose(
+            TransformationDefinition.create(
+                mappings={
+                    a: b,
+                    c: c,
+                },
+            ),
+            TransformationDefinition.create(
+                mappings={
+                    c: c,
+                },
+            ),
         )
 
         self.assertEqual(
-            round_trip_reference.entity,
-            foo,
+            result.known_sources,
+            frozenset({c}),
         )
         self.assertEqual(
-            round_trip_reference.state,
-            backward.destination.id,
-        )
-        self.assertEqual(
-            round_trip_reference.version,
-            initial.reference(foo).version,
-        )
-
-    def test_lossy_round_trip_does_not_claim_exact_restoration(self) -> None:
-        source = EntityID("source")
-        destination = EntityID("destination")
-
-        initial = State.create({
-            source: Value.create(source, 123),
-        })
-
-        lossy = transform_with_mapping(
-            initial,
-            {
-                destination: 100,
-            },
-            {
-                source: destination,
-            },
-            provenance={
-                "lossy": True,
-                "discarded": "23",
-            },
-        )
-
-        reconstructed = transform_with_mapping(
-            lossy.destination,
-            {
-                source: 100,
-            },
-            {
-                destination: source,
-            },
-            provenance={
-                "lossy": True,
-                "reconstructed_from": destination,
-            },
-        )
-
-        self.assertNotEqual(
-            reconstructed.destination.id,
-            initial.id,
-        )
-        self.assertNotEqual(
-            reconstructed.destination.values,
-            initial.values,
+            result.unknown_sources,
+            frozenset({a}),
         )
