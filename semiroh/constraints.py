@@ -15,12 +15,31 @@ class ConstraintResult(Enum):
     UNKNOWN = "unknown"
 
 
+ConstraintPredicate = Callable[[Any], ConstraintResult]
+
+
 @dataclass(frozen=True)
 class Constraint:
-    """Immutable semantic proposition."""
+    """Immutable semantic proposition.
 
-    predicate: Callable[[Any], ConstraintResult]
+    The predicate is the executable evaluation mechanism. Its semantic
+    representation and canonical identity remain separate concerns and are
+    intentionally not inferred from Python callable identity.
+    """
+
+    predicate: ConstraintPredicate
     description: str = ""
+
+    def __post_init__(self) -> None:
+        if not callable(self.predicate):
+            raise TypeError(
+                "constraint predicate must be callable"
+            )
+
+        if not isinstance(self.description, str):
+            raise TypeError(
+                "constraint description must be a string"
+            )
 
     def evaluate(self, subject: Any) -> ConstraintResult:
         """Evaluate the constraint against a subject."""
