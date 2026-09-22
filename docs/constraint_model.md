@@ -1,24 +1,61 @@
 # Constraint Model
 
-This document describes the current architectural model for constraints in
-SEMIROH.
+This document defines the current semantic model for constraints in SEMIROH.
 
 The constraint system is not yet fully implemented. This document records the
-current design rather than claiming a completed implementation.
+current semantic design rather than claiming a completed implementation.
 
 ## 1. Constraints as semantic values
 
-A constraint is a semantic value representing a predicate over semantic
-values.
+A constraint is an immutable semantic value representing a proposition about
+one or more semantic values.
 
 Conceptually:
 
-    Constraint(value) -> result
+    Constraint(subject) -> result
+
+The constraint itself does not contain evaluation state.
 
 Types are also semantic values and may participate in constraint-based
 reasoning.
 
-## 2. Three-valued evaluation
+Constraints may therefore describe properties of:
+
+- values;
+- entities;
+- states;
+- types;
+- relations;
+- transformations;
+- other semantic values.
+
+A constraint describes validity or knowledge about its subject. It does not
+describe an operation that changes the subject.
+
+## 2. Constraint evaluation
+
+Constraint evaluation is an operation that applies a constraint to a subject
+under some evaluation context.
+
+Conceptually:
+
+    Constraint
+        +
+    subject
+        +
+    evaluation context
+        +
+    applicable resources
+        ->
+    ConstraintResult
+
+Evaluation is separate from the constraint itself.
+
+Evaluating a constraint does not mutate the constraint or the subject.
+
+The exact representation of evaluation context remains unspecified.
+
+## 3. Three-valued evaluation
 
 Constraint evaluation has three semantic outcomes:
 
@@ -30,13 +67,33 @@ Constraint evaluation has three semantic outcomes:
 
 It does not mean that the constraint is false.
 
-It means that the system has not established satisfaction or violation under
-the applicable evaluation conditions.
+It means that the system has not established either satisfaction or violation
+under the applicable evaluation conditions.
 
-## 3. Why Unknown exists
+The three outcomes are semantically distinct:
 
-Semantic computation may be expensive, incomplete, externally dependent, or
-subject to explicit resource limits.
+    Satisfied
+        satisfaction has been established
+
+    Violated
+        violation has been established
+
+    Unknown
+        neither has been established
+
+Unknown must not be silently converted into either of the definitive
+outcomes.
+
+## 4. Why Unknown exists
+
+Semantic computation may be:
+
+- expensive;
+- incomplete;
+- externally dependent;
+- resource-bounded;
+- dependent on unavailable information;
+- dependent on unresolved semantic relationships.
 
 The system must therefore distinguish:
 
@@ -47,11 +104,17 @@ The system must therefore distinguish:
 Treating the third case as either success or failure would lose information
 about the limits of available knowledge.
 
-## 4. Evaluation budgets
+Unknown therefore represents an epistemic state, not a third truth value
+equivalent to false.
 
-Potentially expensive semantic computation may be subject to explicit budgets.
+## 5. Evaluation conditions and budgets
 
-Possible dimensions include:
+Constraint evaluation may depend on explicit evaluation conditions.
+
+Potentially expensive semantic computation may also be subject to explicit
+budgets.
+
+Possible budget dimensions include:
 
 - computation steps;
 - memory;
@@ -62,10 +125,24 @@ Possible dimensions include:
 
 The exact budget mechanism is not yet specified.
 
-Where an applicable budget prevents a constraint result from being established,
-the result is `Unknown`.
+Where an applicable evaluation condition or budget prevents a definitive
+constraint result from being established, the result is `Unknown`.
 
-## 5. Evidence
+A budget does not itself establish violation.
+
+For example:
+
+    evaluation exhausted budget
+        ->
+    Unknown
+
+not:
+
+    evaluation exhausted budget
+        ->
+    Violated
+
+## 6. Evidence
 
 Constraint evaluation may rely on evidence such as:
 
@@ -77,11 +154,110 @@ Constraint evaluation may rely on evidence such as:
 - analysis results;
 - transformation references.
 
-The exact representation of evidence remains unresolved.
+Evidence is information used to establish a result.
 
-Evidence should be distinguishable from the truth value it supports.
+Evidence is distinct from the result it supports.
 
-## 6. Constraints and types
+Conceptually:
+
+    evidence
+        +
+    evaluation rules
+        ->
+    ConstraintResult
+
+The current model does not yet define a canonical evidence representation.
+
+A future evidence model must not make evidence indistinguishable from the
+truth or knowledge claim that it supports.
+
+## 7. Constraint identity
+
+A constraint is a semantic value and therefore participates in the SEMIROH
+identity model.
+
+Constraint identity must be independent of mutable evaluation state.
+
+Evaluation results, caches, resource consumption, and runtime evaluation state
+must not change the identity of the constraint.
+
+The exact semantic identity representation for constraints remains
+implementation work.
+
+## 8. Constraint immutability
+
+Constraints are immutable.
+
+Creating a different constraint produces a different semantic value.
+
+Evaluating a constraint does not modify it.
+
+Updating information relevant to a constraint therefore produces another
+semantic object rather than mutating the existing constraint.
+
+This is consistent with the general SEMIROH rule that semantic state and
+semantic values are immutable by default.
+
+Physical implementations may use:
+
+- structural sharing;
+- interning;
+- caching;
+- lazy evaluation;
+- compact representations;
+
+provided that observable semantic behaviour remains equivalent to the
+immutable model.
+
+## 9. Constraint composition
+
+Constraints may be composed into larger constraints.
+
+The composition itself is a new immutable semantic value.
+
+At minimum, the model is expected to support logical composition such as:
+
+    AND
+    OR
+    NOT
+
+The exact representation and evaluation semantics of composed constraints
+remain to be finalized.
+
+Composition must preserve the distinction between:
+
+    Satisfied
+    Violated
+    Unknown
+
+In particular, an implementation must not collapse an unresolved component
+into a definitive result merely because a definitive result would be
+convenient.
+
+Three-valued composition rules must be specified explicitly before the
+composition API is implemented.
+
+## 10. Constraint dependencies
+
+A constraint may depend on other constraints.
+
+For example:
+
+    ValidOwnership
+        depends on
+    AcyclicOwnership
+    UniqueOwner
+
+Dependencies are semantic relationships.
+
+They must not be confused with evaluation history.
+
+A dependency may be evaluated independently and its result may be used as
+evidence for another constraint.
+
+The exact dependency and evaluation model remains unresolved.
+
+## 11. Constraints and types
 
 Types are semantic values.
 
@@ -100,7 +276,11 @@ Conceptually:
 
 The final type and constraint language remains under development.
 
-## 7. Constraints and contracts
+This does not imply that every type-system operation must be implemented as an
+ordinary runtime constraint evaluation. The eventual language may provide
+specialized mechanisms where they are semantically or operationally justified.
+
+## 12. Constraints and contracts
 
 Contracts may contain requirements and guarantees.
 
@@ -108,59 +288,209 @@ Conceptually:
 
     Contract
        |
-       +--> requires  -> Constraint
+       +--> requirements -> Constraint
        |
-       +--> guarantees -> Constraint
+       +--> guarantees  -> Constraint
 
-Contract checking may therefore reuse the constraint machinery.
+A requirement and a guarantee are contextual roles for constraints. They do
+not require two unrelated predicate systems.
 
-The distinction between a requirement and a guarantee is semantic context, not
-a requirement for two unrelated predicate systems.
+A constraint may exist independently of any contract.
 
-## 8. Constraints and transformations
+Contracts therefore build on the constraint model rather than replacing it.
+
+The complete contract model is specified separately.
+
+## 13. Constraints and transformations
 
 Transformations may provide information relevant to constraints.
 
 For example, a transformation may establish structural relationships between
-entities that a later analysis can use as evidence.
+entities that a later constraint evaluation can use as evidence.
 
 Transformation mappings are not themselves automatically truth values.
 
-The semantic meaning of such evidence must be explicitly defined by the
-relevant constraint.
+The semantic meaning of information obtained from a transformation must be
+defined by the relevant constraint.
 
-## 9. Resource limits and ordinary computation
+A transformation does not automatically prove that a constraint is preserved.
+
+For example:
+
+    constraint holds in S₀
+        +
+    transformation S₀ -> S₁
+        !=
+    constraint holds in S₁
+
+Preservation must be established explicitly by the applicable semantic rules
+or analysis.
+
+## 14. Constraint preservation across transformations
+
+A constraint may be evaluated before and after a transformation.
+
+Possible knowledge about preservation includes:
+
+    Preserved
+    Broken
+    Unknown
+
+These are statements about knowledge of the relationship between the
+constraint and the transformation.
+
+They are not replacements for the ordinary constraint results:
+
+    Satisfied
+    Violated
+    Unknown
+
+The exact preservation relation remains to be specified.
+
+In particular, the current transformation model must not be extended with
+implicit constraint-preservation semantics until those semantics are defined.
+
+## 15. Constraint composition versus transformation composition
+
+Constraint composition and transformation composition are different operations.
+
+Constraint composition combines propositions.
+
+Transformation composition combines explicit continuity information.
+
+For example:
+
+    Constraint A
+    AND
+    Constraint B
+
+produces a constraint describing both propositions.
+
+Whereas:
+
+    A -> B
+    B -> C
+
+produces composed transformation continuity information:
+
+    A -> C
+
+The two forms of composition must not be conflated.
+
+## 16. Constraints and semantic state
+
+A constraint may describe a property of a semantic state.
+
+For example:
+
+    ValidState(S)
+
+may establish that the values and ownership relation of `S` satisfy a
+specified invariant.
+
+Evaluation of the constraint does not alter `S`.
+
+A state may satisfy a constraint independently of whether the state is
+currently active.
+
+State identity remains determined by semantic state content rather than by
+constraint evaluation history.
+
+## 17. Constraints and references
+
+A constraint may describe properties involving references.
+
+Reference validity itself is defined by the reference model.
+
+A constraint may use that validity as a semantic fact, but constraint
+evaluation must not silently alter reference semantics.
+
+In particular:
+
+    EntityID reuse
+    state adjacency
+    structural similarity
+
+must not manufacture continuity merely because a constraint refers to related
+entities.
+
+Reference transfer remains an explicit transformation operation.
+
+## 18. Constraint evaluation and ordinary computation
 
 Not every semantic computation necessarily produces a three-valued result.
 
-A computation producing an ordinary semantic value may instead use its own
-explicit error contract.
+An ordinary semantic computation may produce:
 
-The three-valued model is primarily relevant where the semantic question is
-whether a proposition has been established.
+- a semantic value;
+- an explicitly defined error;
+- another operation-specific result.
 
-## 10. Soundness principle
+The three-valued constraint model is primarily relevant when the semantic
+question is whether a proposition has been established.
+
+Therefore:
+
+    ordinary computation failure
+        != automatically Unknown
+
+and:
+
+    constraint evaluation Unknown
+        != ordinary execution failure
+
+The semantics of ordinary computation errors belong to the relevant future
+error and effect models.
+
+## 19. Soundness principle
 
 A system must not report `Satisfied` or `Violated` merely because an answer
 could theoretically be obtained with unlimited computation.
 
-A result must be supported by the evaluation rules and available evidence.
+A definitive result must be supported by the applicable evaluation rules and
+available evidence.
 
-## 11. Current implementation status
+The implementation may be incomplete while remaining semantically sound.
 
-The current Python reference model establishes the broader semantic architecture
-but does not yet constitute a complete constraint implementation.
+In particular:
 
-The exact constraint representation, evaluator, evidence model, and resource
-budget mechanism remain future work.
+    insufficient evidence
+        ->
+    Unknown
 
-## 12. Unresolved areas
+must be preferred to an unsupported definitive result.
+
+## 20. Current implementation status
+
+The current Python reference model establishes the broader semantic
+architecture but does not yet constitute a complete constraint implementation.
+
+The following remain future work:
+
+- concrete constraint representation;
+- constraint evaluation;
+- constraint result representation;
+- evidence representation;
+- evaluation context;
+- evaluation budgets;
+- constraint composition;
+- dependency evaluation;
+- preservation analysis.
+
+The absence of implementation must not be interpreted as an absence of the
+semantic concept.
+
+## 21. Unresolved areas
 
 Open questions include:
 
-- constraint representation;
+- exact constraint representation;
+- constraint identity;
+- predicate representation;
 - evidence representation;
+- evaluation context;
 - constraint composition;
+- three-valued composition rules;
 - implication and dependency;
 - incremental constraint evaluation;
 - constraint caching;
@@ -168,9 +498,14 @@ Open questions include:
 - interaction with equality;
 - interaction with contracts;
 - interaction with effects and capabilities;
+- interaction with transformation preservation;
 - formal soundness rules.
 
-## 13. Design principle
+The constraint model does not currently require a separate first-class
+predicate object. Whether predicates eventually become independently
+represented semantic values remains open.
+
+## 22. Design principles
 
 The constraint system represents knowledge explicitly.
 
@@ -179,5 +514,18 @@ In particular:
     Unknown != Violated
     Unknown != Satisfied
 
-The language should preserve this distinction rather than silently converting
-lack of knowledge into a definitive semantic result.
+A constraint is an immutable semantic value.
+
+Constraint evaluation is separate from the constraint.
+
+Evaluation state and cached results do not become part of constraint identity.
+
+Evidence is distinct from the result established from that evidence.
+
+Constraints may be reused by contracts and other semantic mechanisms.
+
+Constraints do not automatically establish properties of future states or
+transformations.
+
+The language should preserve these distinctions rather than silently
+converting lack of knowledge into a definitive semantic result.
