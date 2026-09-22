@@ -6,7 +6,6 @@ from semiroh import (
     EntityID,
     State,
     Value,
-    version_id_for,
 )
 
 
@@ -26,6 +25,8 @@ class StateTests(unittest.TestCase):
         })
 
         self.assertEqual(first.id, second.id)
+        self.assertEqual(first, second)
+        self.assertEqual(hash(first), hash(second))
 
     def test_state_values_are_immutable(self) -> None:
         foo = EntityID("foo")
@@ -151,3 +152,108 @@ class StateTests(unittest.TestCase):
             State.create({
                 foo: Value.create(bar, 42),
             })
+
+    def test_semantic_digest_matches_state_id(self) -> None:
+        foo = EntityID("foo")
+
+        state = State.create({
+            foo: Value.create(foo, 42),
+        })
+
+        self.assertEqual(
+            state.semantic_digest,
+            state.id.value,
+        )
+
+    def test_semantic_digest_is_deterministic(self) -> None:
+        foo = EntityID("foo")
+
+        first = State.create({
+            foo: Value.create(
+                foo,
+                {
+                    "a": [1, 2],
+                    "b": ("x", "y"),
+                },
+            ),
+        })
+
+        second = State.create({
+            foo: Value.create(
+                foo,
+                {
+                    "b": ("x", "y"),
+                    "a": [1, 2],
+                },
+            ),
+        })
+
+        self.assertEqual(
+            first.semantic_digest,
+            second.semantic_digest,
+        )
+
+    def test_state_equality_detects_different_values(self) -> None:
+        foo = EntityID("foo")
+
+        first = State.create({
+            foo: Value.create(foo, 1),
+        })
+
+        second = State.create({
+            foo: Value.create(foo, 2),
+        })
+
+        self.assertNotEqual(first, second)
+
+    def test_state_equality_includes_ownership(self) -> None:
+        owner = EntityID("owner")
+        child = EntityID("child")
+
+        first = State.create(
+            {
+                owner: Value.create(owner, "owner"),
+                child: Value.create(child, "child"),
+            },
+            {
+                owner: (child,),
+            },
+        )
+
+        second = State.create(
+            {
+                owner: Value.create(owner, "owner"),
+                child: Value.create(child, "child"),
+            },
+        )
+
+        self.assertNotEqual(first, second)
+
+    def test_state_equality_ignores_input_mapping_order(self) -> None:
+        first_entity = EntityID("first")
+        second_entity = EntityID("second")
+
+        first = State.create({
+            first_entity: Value.create(
+                first_entity,
+                "one",
+            ),
+            second_entity: Value.create(
+                second_entity,
+                "two",
+            ),
+        })
+
+        second = State.create({
+            second_entity: Value.create(
+                second_entity,
+                "two",
+            ),
+            first_entity: Value.create(
+                first_entity,
+                "one",
+            ),
+        })
+
+        self.assertEqual(first, second)
+        self.assertEqual(first.id, second.id)
