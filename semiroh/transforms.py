@@ -59,11 +59,7 @@ class TransformationMapping:
 
 @dataclass(frozen=True)
 class TransformationDefinition:
-    """Immutable semantic definition of a state transformation.
-
-    The definition is independent of a particular source state. It describes
-    semantic value changes and explicit entity continuity.
-    """
+    """Immutable semantic definition of a state transformation."""
 
     changes: tuple[EntityChange, ...]
     mappings: tuple[TransformationMapping, ...]
@@ -114,10 +110,7 @@ class TransformationDefinition:
                 (
                     EntityChange(
                         entity=entity,
-                        value=Value(
-                            entity,
-                            content,
-                        ),
+                        value=Value(entity, content),
                     )
                     for entity, content in (changes or {}).items()
                 ),
@@ -131,20 +124,12 @@ class TransformationDefinition:
                     TransformationMapping(
                         source_entity=source_entity,
                         destination_entities=(
-                            tuple(
-                                sorted(
-                                    (
-                                        destination_spec,
-                                    )
-                                )
-                            )
+                            (destination_spec,)
                             if isinstance(
                                 destination_spec,
                                 EntityID,
                             )
-                            else tuple(
-                                sorted(destination_spec)
-                            )
+                            else tuple(destination_spec)
                         ),
                     )
                     for source_entity, destination_spec in (
@@ -153,6 +138,16 @@ class TransformationDefinition:
                 ),
                 key=lambda mapping: mapping.source_entity,
             )
+        )
+
+        normalized_mappings = tuple(
+            TransformationMapping(
+                source_entity=mapping.source_entity,
+                destination_entities=tuple(
+                    sorted(mapping.destination_entities)
+                ),
+            )
+            for mapping in normalized_mappings
         )
 
         return TransformationDefinition(
@@ -166,28 +161,7 @@ class TransformationDefinition:
         provenance: Any = None,
         ownership: Mapping[EntityID, Any] | None = None,
     ) -> "TransformResult":
-        """Apply the definition and produce an immutable transformation result.
-
-        The transformation is partial.
-
-        Unmapped source entities are preserved. Explicitly mapped source
-        entities are removed from their source representation and represented
-        only by their mapped destination entities. Therefore:
-
-            A -> ()      disappearance
-            A -> A       explicit continuity
-            A -> B       explicit continuation under a new entity
-            A -> (B, C)  split
-            A, B -> C    merge
-
-        Value changes independently replace existing values or create new
-        destination entities when the changed entity was absent from the
-        source state.
-
-        Destination entities without incoming mappings are newly created
-        entities unless they are preserved by an unchanged source entity with
-        the same EntityID.
-        """
+        """Apply the definition and produce an immutable transformation result."""
 
         values = dict(state.values)
 
@@ -208,16 +182,6 @@ class TransformationDefinition:
 
             explicitly_mapped.add(source_entity)
 
-            if not mapping.destination_entities:
-                normalized_mappings.append(
-                    EntityMapping(
-                        source_state=state.id,
-                        source_entity=source_entity,
-                        destination_entities=(),
-                    )
-                )
-                continue
-
             for destination_entity in mapping.destination_entities:
                 if destination_entity not in values:
                     raise KeyError(
@@ -229,9 +193,7 @@ class TransformationDefinition:
                 EntityMapping(
                     source_state=state.id,
                     source_entity=source_entity,
-                    destination_entities=(
-                        mapping.destination_entities
-                    ),
+                    destination_entities=mapping.destination_entities,
                 )
             )
 
@@ -254,10 +216,11 @@ class TransformationDefinition:
                         None,
                     )
 
-                    if change is not None:
-                        values[source_entity] = change.value
-                    else:
-                        values[source_entity] = source_value
+                    values[source_entity] = (
+                        change.value
+                        if change is not None
+                        else source_value
+                    )
 
         if ownership is None:
             destination_ownership = {
@@ -296,17 +259,7 @@ class TransformationDefinition:
 
 @dataclass(frozen=True)
 class CompositionResult:
-    """Immutable result of composing two transformation definitions.
-
-    ``mappings`` contains continuity that can be established explicitly
-    through both transformations.
-
-    ``unknown_sources`` contains sources for which the first transformation
-    establishes continuity, but the second transformation does not establish
-    what happens to the corresponding intermediate entity.
-
-    Unknown is distinct from disappearance.
-    """
+    """Immutable result of composing two transformation definitions."""
 
     mappings: tuple[TransformationMapping, ...]
     unknown_sources: frozenset[EntityID]
@@ -359,7 +312,7 @@ class CompositionResult:
 
 @dataclass(frozen=True)
 class EntityMapping:
-    """Explicit continuity relation from one source entity to zero or more destinations."""
+    """Explicit continuity relation from one source entity to destinations."""
 
     source_state: StateID
     source_entity: EntityID
@@ -496,7 +449,7 @@ def compose(
     has no explicit mapping in the second transformation, continuity becomes
     unknown rather than being inferred from preservation.
 
-    Destination entities are treated as sets, so duplicate endpoints collapse.
+    Destination entities use set semantics, so duplicate endpoints collapse.
     """
 
     second_mappings = {
@@ -576,10 +529,7 @@ def transform(
 
 def transform_with_mapping(
     state: State,
-    changes: Mapping[
-        EntityID,
-        Any,
-    ],
+    changes: Mapping[EntityID, Any],
     entity_mappings: Mapping[
         EntityID,
         EntityID | tuple[EntityID, ...],
