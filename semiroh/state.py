@@ -88,6 +88,9 @@ class State:
     Transformation mappings and provenance are not state content.
 
     Ownership is part of semantic state content.
+
+    Equality and hashing are semantic: two states with identical canonical
+    semantic content are equal regardless of how their mappings were supplied.
     """
 
     id: StateID
@@ -96,6 +99,32 @@ class State:
         EntityID,
         tuple[EntityID, ...],
     ]
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, State):
+            return NotImplemented
+
+        return (
+            self.id == other.id
+            and self._content_bytes() == other._content_bytes()
+        )
+
+    def __hash__(self) -> int:
+        return hash(self.id)
+
+    def _content_bytes(self) -> bytes:
+        return _state_content(
+            self.values,
+            self.ownership,
+        )
+
+    @property
+    def semantic_digest(self) -> str:
+        """Return the canonical SHA-256 digest of semantic state content."""
+
+        return sha256(
+            self._content_bytes()
+        ).hexdigest()
 
     @staticmethod
     def create(
