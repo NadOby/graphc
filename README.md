@@ -126,8 +126,16 @@ describe entity continuity between the source and destination states.
 Continuity is represented as an explicit zero/one/many relation. Reference
 transfer across a transformation is state-local and explicit.
 
+Continuity composition currently operates on explicit transformation mappings.
+It does not yet constitute full semantic composition of transformation
+changes or complete state transitions.
+
 The current transformation semantics are specified in
 [`docs/transformation_model.md`](docs/transformation_model.md).
+
+The current continuity-composition semantics are specified in
+[`docs/transformation_composition.md`](docs/transformation_composition.md) and
+[`docs/transformation_composition_api.md`](docs/transformation_composition_api.md).
 
 ## 6. References
 
@@ -217,6 +225,9 @@ Constraint evaluation has three possible semantic results:
 Potentially expensive semantic computation may be subject to explicit resource
 budgets.
 
+Constraints are immutable semantic values and are evaluated separately from
+the constraints themselves.
+
 See [`docs/constraint_model.md`](docs/constraint_model.md).
 
 ## 11. Equality
@@ -269,19 +280,40 @@ The exact effect and capability systems remain under development.
 
 ## 14. Contracts
 
-Contracts are semantic values that can describe other values.
+Contracts are immutable semantic values that describe other semantic values.
 
 Conceptually:
 
     Contract -> describes -> Value
 
-Contracts may contain requirements and guarantees expressed through
-constraints.
+Contracts contain requirements and guarantees expressed through constraints.
 
-Contracts may describe callable values, modules, transformations, types,
-data, resources, and representations.
+A contract is not restricted to callable values. It may describe:
 
-The exact contract composition and checking model remains under development.
+- callable values;
+- transformations;
+- types;
+- modules;
+- data;
+- resources;
+- representations;
+- semantic states;
+- other semantic values.
+
+Requirements describe conditions for contractual applicability or validity.
+
+Guarantees describe properties established when the applicable contractual
+conditions hold.
+
+Contract evaluation must preserve the distinction between established,
+violated, and unknown conditions where those distinctions apply.
+
+The contract system does not introduce a separate predicate system.
+
+The exact contract composition, refinement, validation, and checking models
+remain under development.
+
+See [`docs/contract_model.md`](docs/contract_model.md).
 
 ## 15. Collections and representations
 
@@ -471,12 +503,16 @@ The current architecture is organized around several high-value invariants:
 10. Transformations do not silently mutate source states.
 11. Capabilities describe authority; effects describe behaviour.
 12. Constraints distinguish `Satisfied`, `Violated`, and `Unknown`.
-13. Contracts are independent semantic values.
+13. Contracts are independent immutable semantic values.
 14. Ownership and ordinary references are separate relations.
 15. Source and machine code are representations rather than the canonical
     semantic program.
 16. Opaque values do not need to be fully graph-expanded.
 17. Foreign integration relies on explicit semantic derivation.
+18. Continuity composition does not infer continuity from preservation.
+19. Unknown continuity is distinct from known disappearance.
+20. Full semantic transformation composition is not implied by continuity
+    composition.
 
 ## 28. State identity and provenance
 
@@ -623,10 +659,13 @@ Important open areas include:
 - effect inference;
 - effect hiding;
 - contract composition;
+- contract refinement;
+- contract validation;
+- contract evidence and certificates;
 - metaprogram resource budgets;
 - exact provenance representation;
 - transformation identity and equality;
-- formal transformation composition;
+- full semantic transformation composition;
 - formal lossless/lossy transformation semantics;
 - transformation deltas and distance measures;
 - serialization format;
