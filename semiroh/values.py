@@ -31,6 +31,12 @@ class Value:
     ) -> "Value":
         return Value(entity, content)
 
+    @property
+    def version_id(self) -> VersionID:
+        """Return the exact semantic version identity of this value."""
+
+        return version_id_for(self)
+
 
 def version_id_for(value: Value) -> VersionID:
     """Derive exact version identity from entity and semantic content."""
