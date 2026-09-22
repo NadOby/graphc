@@ -123,13 +123,17 @@ class TransformationDefinition:
                 (
                     TransformationMapping(
                         source_entity=source_entity,
-                        destination_entities=(
-                            (destination_spec,)
-                            if isinstance(
-                                destination_spec,
-                                EntityID,
+                        destination_entities=tuple(
+                            sorted(
+                                (
+                                    (destination_spec,)
+                                    if isinstance(
+                                        destination_spec,
+                                        EntityID,
+                                    )
+                                    else tuple(destination_spec)
+                                )
                             )
-                            else tuple(destination_spec)
                         ),
                     )
                     for source_entity, destination_spec in (
@@ -138,16 +142,6 @@ class TransformationDefinition:
                 ),
                 key=lambda mapping: mapping.source_entity,
             )
-        )
-
-        normalized_mappings = tuple(
-            TransformationMapping(
-                source_entity=mapping.source_entity,
-                destination_entities=tuple(
-                    sorted(mapping.destination_entities)
-                ),
-            )
-            for mapping in normalized_mappings
         )
 
         return TransformationDefinition(
@@ -259,7 +253,7 @@ class TransformationDefinition:
 
 @dataclass(frozen=True)
 class CompositionResult:
-    """Immutable result of composing two transformation definitions."""
+    """Immutable result of composing two transformation relations."""
 
     mappings: tuple[TransformationMapping, ...]
     unknown_sources: frozenset[EntityID]
@@ -439,15 +433,22 @@ class TransformResult:
         return destinations[0]
 
 
+TransformationRelation = TransformationDefinition | CompositionResult
+
+
 def compose(
-    first: TransformationDefinition,
-    second: TransformationDefinition,
+    first: TransformationRelation,
+    second: TransformationRelation,
 ) -> CompositionResult:
-    """Compose explicit continuity mappings from two transformations.
+    """Compose explicit continuity mappings from two transformation relations.
 
     Only explicit mappings compose. If a destination of the first mapping
-    has no explicit mapping in the second transformation, continuity becomes
+    has no explicit mapping in the second relation, continuity becomes
     unknown rather than being inferred from preservation.
+
+    An already-unknown source remains unknown through later composition.
+    Unknown sources of the second relation are considered only when they
+    correspond to intermediate entities reached by the first relation.
 
     Destination entities use set semantics, so duplicate endpoints collapse.
     """
@@ -456,9 +457,13 @@ def compose(
         mapping.source_entity: mapping.destination_entities
         for mapping in second.mappings
     }
+    second_unknown_sources = second.unknown_sources
 
     composed: list[TransformationMapping] = []
     unknown_sources: set[EntityID] = set()
+
+    if isinstance(first, CompositionResult):
+        unknown_sources.update(first.unknown_sources)
 
     for first_mapping in first.mappings:
         source_entity = first_mapping.source_entity
@@ -477,6 +482,10 @@ def compose(
         unknown = False
 
         for intermediate_entity in intermediate_entities:
+            if intermediate_entity in second_unknown_sources:
+                unknown = True
+                continue
+
             second_destinations = second_mappings.get(
                 intermediate_entity
             )
@@ -489,23 +498,16 @@ def compose(
 
         if unknown:
             unknown_sources.add(source_entity)
+            continue
 
-        if final_entities and not unknown:
-            composed.append(
-                TransformationMapping(
-                    source_entity=source_entity,
-                    destination_entities=tuple(
-                        sorted(final_entities)
-                    ),
-                )
+        composed.append(
+            TransformationMapping(
+                source_entity=source_entity,
+                destination_entities=tuple(
+                    sorted(final_entities)
+                ),
             )
-        elif not final_entities and not unknown:
-            composed.append(
-                TransformationMapping(
-                    source_entity=source_entity,
-                    destination_entities=(),
-                )
-            )
+        )
 
     return CompositionResult(
         mappings=tuple(
@@ -619,5 +621,5 @@ def rebind_reference(
     return Reference(
         state=destination.id,
         entity=destination_entity,
-        ⁶),
-        )
+        version=version_id_for(destination_value),
+)
