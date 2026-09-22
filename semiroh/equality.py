@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .values import Value, version_id_for
+from .values import Value
 
 
 def semantic_equal(
@@ -29,4 +29,4 @@ def same_version(
 ) -> bool:
     """Compare exact semantic versions."""
 
-    return version_id_for(left) == version_id_for(right)
+    return left.version_id == right.version_id
