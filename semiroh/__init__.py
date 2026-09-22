@@ -1,6 +1,7 @@
 """SEMIROH executable semantic reference model."""
 
 from .canonical import canonical_serialize, canonicalize
+from .constraints import Constraint, ConstraintResult
 from .equality import semantic_equal, same_entity, same_version
 from .identity import Entity, EntityID, StateID, VersionID
 from .ownership import (
@@ -41,6 +42,8 @@ __all__ = [
     "Value",
     "Reference",
     "State",
+    "Constraint",
+    "ConstraintResult",
     "EntityChange",
     "TransformationMapping",
     "TransformationDefinition",
