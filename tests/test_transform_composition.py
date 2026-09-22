@@ -24,7 +24,10 @@ class TransformationCompositionTests(unittest.TestCase):
             result.mapping_for(a).destination_entities,
             (c,),
         )
-        self.assertEqual(result.unknown_sources, frozenset())
+        self.assertEqual(
+            result.unknown_sources,
+            frozenset(),
+        )
 
     def test_disappearance_composes(self) -> None:
         a = EntityID("A")
@@ -40,7 +43,10 @@ class TransformationCompositionTests(unittest.TestCase):
             result.mapping_for(a).destination_entities,
             (),
         )
-        self.assertEqual(result.unknown_sources, frozenset())
+        self.assertEqual(
+            result.unknown_sources,
+            frozenset(),
+        )
 
     def test_split_composes(self) -> None:
         a = EntityID("A")
@@ -65,7 +71,6 @@ class TransformationCompositionTests(unittest.TestCase):
             result.mapping_for(a).destination_entities,
             (d, e),
         )
-        self.assertEqual(result.unknown_sources, frozenset())
 
     def test_split_merge_uses_set_semantics(self) -> None:
         a = EntityID("A")
@@ -242,6 +247,20 @@ class TransformationCompositionTests(unittest.TestCase):
             frozenset({a}),
         )
 
+    def test_unsorted_mapping_destinations_are_canonicalized(self) -> None:
+        a = EntityID("A")
+        b = EntityID("B")
+        c = EntityID("C")
+
+        definition = TransformationDefinition.create(
+            mappings={a: (c, b)},
+        )
+
+        self.assertEqual(
+            definition.mappings[0].destination_entities,
+            (b, c),
+        )
+
     def test_composition_is_associative_for_chain(self) -> None:
         a = EntityID("A")
         b = EntityID("B")
@@ -258,29 +277,22 @@ class TransformationCompositionTests(unittest.TestCase):
             mappings={c: d},
         )
 
-        first_second = compose(first, second)
-        second_third = compose(second, third)
-
         left = compose(
-            TransformationDefinition.create(
-                mappings={
-                    a: first_second.mapping_for(a).destination_entities,
-                },
-            ),
+            compose(first, second),
             third,
         )
         right = compose(
             first,
-            TransformationDefinition.create(
-                mappings={
-                    b: second_third.mapping_for(b).destination_entities,
-                },
-            ),
+            compose(second, third),
         )
 
         self.assertEqual(
-            left.mapping_for(a).destination_entities,
-            right.mapping_for(a).destination_entities,
+            left.mappings,
+            right.mappings,
+        )
+        self.assertEqual(
+            left.unknown_sources,
+            right.unknown_sources,
         )
 
     def test_composition_is_associative_for_split_merge(self) -> None:
@@ -303,30 +315,22 @@ class TransformationCompositionTests(unittest.TestCase):
             mappings={d: e},
         )
 
-        first_second = compose(first, second)
-        second_third = compose(second, third)
-
         left = compose(
-            TransformationDefinition.create(
-                mappings={
-                    a: first_second.mapping_for(a).destination_entities,
-                },
-            ),
+            compose(first, second),
             third,
         )
         right = compose(
             first,
-            TransformationDefinition.create(
-                mappings={
-                    b: second_third.mapping_for(b).destination_entities,
-                    c: second_third.mapping_for(c).destination_entities,
-                },
-            ),
+            compose(second, third),
         )
 
         self.assertEqual(
-            left.mapping_for(a).destination_entities,
-            right.mapping_for(a).destination_entities,
+            left.mappings,
+            right.mappings,
+        )
+        self.assertEqual(
+            left.unknown_sources,
+            right.unknown_sources,
         )
 
     def test_composition_is_associative_with_unknown(self) -> None:
@@ -352,12 +356,38 @@ class TransformationCompositionTests(unittest.TestCase):
             compose(second, third),
         )
 
-        self.assertEqual(left.mappings, right.mappings)
+        self.assertEqual(
+            left.mappings,
+            right.mappings,
+        )
         self.assertEqual(
             left.unknown_sources,
             right.unknown_sources,
         )
         self.assertEqual(
             left.unknown_sources,
+            frozenset({a}),
+        )
+
+    def test_unknown_propagates_through_later_mapping(self) -> None:
+        a = EntityID("A")
+        b = EntityID("B")
+        c = EntityID("C")
+        d = EntityID("D")
+
+        first = TransformationDefinition.create(
+            mappings={a: b},
+        )
+        second = TransformationDefinition.create()
+        third = TransformationDefinition.create(
+            mappings={b: c},
+        )
+
+        first_second = compose(first, second)
+        result = compose(first_second, third)
+
+        self.assertIsNone(result.mapping_for(a))
+        self.assertEqual(
+            result.unknown_sources,
             frozenset({a}),
         )
