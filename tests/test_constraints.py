@@ -80,3 +80,16 @@ class ConstraintTests(unittest.TestCase):
             constraint.evaluate(object()),
             ConstraintResult,
         )
+
+    def test_non_callable_predicate_is_rejected(self) -> None:
+        with self.assertRaises(TypeError):
+            Constraint(
+                predicate=42,  # type: ignore[arg-type]
+            )
+
+    def test_non_string_description_is_rejected(self) -> None:
+        with self.assertRaises(TypeError):
+            Constraint(
+                predicate=lambda _: ConstraintResult.UNKNOWN,
+                description=42,  # type: ignore[arg-type]
+            )
