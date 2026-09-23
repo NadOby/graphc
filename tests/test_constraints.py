@@ -121,3 +121,18 @@ class ConstraintTests(unittest.TestCase):
             ConstraintResult.VIOLATED,
             ConstraintResult.UNKNOWN,
         )
+
+    def test_unknown_result_is_not_known(self) -> None:
+        self.assertFalse(
+            ConstraintResult.UNKNOWN.is_known
+        )
+
+    def test_satisfied_result_is_known(self) -> None:
+        self.assertTrue(
+            ConstraintResult.SATISFIED.is_known
+        )
+
+    def test_violated_result_is_known(self) -> None:
+        self.assertTrue(
+            ConstraintResult.VIOLATED.is_known
+        )
