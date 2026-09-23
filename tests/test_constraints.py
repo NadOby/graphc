@@ -93,3 +93,31 @@ class ConstraintTests(unittest.TestCase):
                 predicate=lambda _: ConstraintResult.UNKNOWN,
                 description=42,  # type: ignore[arg-type]
             )
+
+    def test_constraint_result_values_are_stable(self) -> None:
+        self.assertEqual(
+            ConstraintResult.SATISFIED.value,
+            "satisfied",
+        )
+        self.assertEqual(
+            ConstraintResult.VIOLATED.value,
+            "violated",
+        )
+        self.assertEqual(
+            ConstraintResult.UNKNOWN.value,
+            "unknown",
+        )
+
+    def test_constraint_result_members_are_distinct(self) -> None:
+        self.assertNotEqual(
+            ConstraintResult.SATISFIED,
+            ConstraintResult.VIOLATED,
+        )
+        self.assertNotEqual(
+            ConstraintResult.SATISFIED,
+            ConstraintResult.UNKNOWN,
+        )
+        self.assertNotEqual(
+            ConstraintResult.VIOLATED,
+            ConstraintResult.UNKNOWN,
+        )
