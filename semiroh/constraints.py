@@ -14,6 +14,12 @@ class ConstraintResult(Enum):
     VIOLATED = "violated"
     UNKNOWN = "unknown"
 
+    @property
+    def is_known(self) -> bool:
+        """Return whether the result is decisive."""
+
+        return self is not ConstraintResult.UNKNOWN
+
 
 ConstraintPredicate = Callable[[Any], ConstraintResult]
 
